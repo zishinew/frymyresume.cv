@@ -408,6 +408,10 @@ pydantic-core==2.41.5 \
     --hash=sha256:e56ba91f47764cc14f1daacd723e3e82d1a89d783f0f5afe9c364b8bb491ccdb \
     --hash=sha256:e672ba74fbc2dc8eea59fb6d4aed6845e6905fc2a8afe93175d94a83ba2a01a0
     # via pydantic
+pypdf2==3.0.1 \
+    --hash=sha256:a74408f69ba6271f71b9352ef4ed03dc53a31aa404d29b5d31f53bfecfee1440 \
+    --hash=sha256:d16e4205cfee272fbdc0568b68d82be796540b1537508cef59388f839c191928
+    # via resume-critique
 python-dotenv==1.2.1 \
     --hash=sha256:42667e897e16ab0d66954af0e60a9caa94f0fd4ecf3aaf6d2d260eec1aa36ad6 \
     --hash=sha256:b81ee9561e9ca4004139c6cbba3a238c32b03e4894671e181b671e8cb8425d61
