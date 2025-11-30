@@ -154,6 +154,7 @@ if analyze_button and uploaded_file:
             Provide your feedback and analysis in a clear strutured format with specific recommendations.
             Additional Notes: {notes + "If the student is still in university, they are probably applying for internship roles"if notes else "If the student is still in university, they are probably applying for internship roles"}
             Be SUPER strict and BRUTALLY honest. This is an EXTREMELY IMPORTANT POINT. IF THEY ARE NOT READY, DO NOT GIVE THEM FALSE HOPE. {f"Consider the current job market for the {job_role} industry" if job_role else ""} If the user is not qualified give them a serious reality check, however do not be demotivating. Tell them their current situation, and provide next steps.
+            Do not weigh in factors such as "for a first year your resume is very good" into the rating and give them a high rating. You can mention it in the analysis, but make the rating out of ten extremely strict and realistic for the job market.
             Jump right into the rating and analysis.
             When providing them with a rating, use this scale:
             1-3: Resume needs LOTS of work, and as of where they are right now they have no chance in the industry.
