@@ -1,0 +1,138 @@
+.behavioral-interview {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.interview-status {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.question-number {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.recording-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-secondary);
+  font-size: 0.9375rem;
+}
+
+.recording-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--error);
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.question-display {
+  background: var(--card-bg-solid);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 2rem;
+  margin-bottom: 2rem;
+}
+
+.question-display h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 1rem;
+}
+
+.question-text {
+  font-size: 1.125rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.response-section {
+  margin-bottom: 2rem;
+}
+
+.response-section h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 1rem;
+}
+
+.transcript {
+  background: var(--card-bg-solid);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  min-height: 100px;
+}
+
+.transcript p {
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.controls {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+}
+
+.record-button,
+.stop-button {
+  padding: 1rem 2rem;
+  font-size: 1rem;
+  font-weight: 500;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.record-button {
+  background: var(--accent);
+  color: white;
+}
+
+.record-button:hover {
+  background: var(--accent-hover);
+}
+
+.stop-button {
+  background: var(--error);
+  color: white;
+}
+
+.stop-button:hover {
+  background: #b91c1c;
+}
+
+.playing-indicator {
+  padding: 1rem 2rem;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.error-message {
+  background: rgba(220, 38, 38, 0.1);
+  color: var(--error);
+  padding: 1rem;
+  border-radius: 8px;
+  border: 1px solid rgba(220, 38, 38, 0.3);
+  margin-top: 1rem;
+}
