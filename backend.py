@@ -3527,18 +3527,11 @@ Current question number: {interview_state['questions_asked'] + 1} of {interview_
             # Ask Gemini to include transcripts alongside audio.
             "input_audio_transcription": {},
             "output_audio_transcription": {},
-            "speech_config": {
-                "voice_config": {
-                    "prebuilt_voice_config": {
-                        "voice_name": "Puck"
-                    }
-                }
-            },
             "system_instruction": {
                 "role": "system",
                 "parts": [{"text": system_instruction}]
             },
-            # Configure turn detection to be less sensitive and reduce interruptions
+            # Configure voice and turn detection
             "generation_config": {
                 "speech_config": {
                     "voice_config": {
