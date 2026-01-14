@@ -2,23 +2,28 @@ import { useState, useEffect, useRef } from 'react'
 import Editor from '@monaco-editor/react' // Uncomment after: npm install @monaco-editor/react
 import './TechnicalInterview.css'
 
-interface TestResult {
-  test_case: number
-  input: any
-  expected_output: any
-  actual_output: any
-  passed: boolean
-  error?: string
-}
-
 interface Question {
   id: string
   title: string
-  description: string
   difficulty: string
-  examples: Array<{ input: string; output: string; explanation?: string }>
-  constraints: string[]
-  testCases: Array<{ input: any; expectedOutput: any }>
+  description?: string
+  examples?: Array<{ input: string; output: string; explanation?: string }>
+  constraints?: string[]
+}
+
+interface GradeResult {
+  passed: boolean
+  score: number
+  passed_tests: number
+  total_tests: number
+  test_results: Array<{
+    test_case: number
+    input: any
+    expected_output: any
+    actual_output: any
+    passed: boolean
+    error?: string | null
+  }>
 }
 
 type Language = 'python' | 'javascript' | 'java' | 'cpp' | 'c'
@@ -44,16 +49,46 @@ function TechnicalInterview({ company, role, difficulty, onComplete }: Technical
   const [code, setCode] = useState<{ [key: string]: { [lang: string]: string } }>({})
   const [selectedLanguage, setSelectedLanguage] = useState<Language>('python')
   const [timeRemaining, setTimeRemaining] = useState(3600) // 60 minutes in seconds
-  const [results, setResults] = useState<{ [key: string]: { passed: boolean; score: number; testResults?: TestResult[]; submitted?: boolean } }>({})
-  const [loading, setLoading] = useState(false)
+  const [solved, setSolved] = useState<Record<string, boolean>>({})
+
+  const [loadingInterview, setLoadingInterview] = useState(true)
+  const [gradingLoading, setGradingLoading] = useState(false)
+  const [gradingErrorById, setGradingErrorById] = useState<Record<string, string | null>>({})
+  const [gradeResultById, setGradeResultById] = useState<Record<string, GradeResult | null>>({})
+
   const editorRef = useRef<any>(null)
+  const questionsRef = useRef<Question[]>([])
+  const solvedRef = useRef<Record<string, boolean>>({})
+
+  useEffect(() => {
+    solvedRef.current = solved
+  }, [solved])
+
+  useEffect(() => {
+    questionsRef.current = questions
+  }, [questions])
+
+  const getOrCreateClientId = (): string => {
+    const key = 'offerready_client_id'
+    try {
+      const existing = localStorage.getItem(key)
+      if (existing) return existing
+      const generated = (globalThis.crypto && 'randomUUID' in globalThis.crypto)
+        ? globalThis.crypto.randomUUID()
+        : `client_${Math.random().toString(16).slice(2)}_${Date.now()}`
+      localStorage.setItem(key, generated)
+      return generated
+    } catch {
+      return `client_${Math.random().toString(16).slice(2)}_${Date.now()}`
+    }
+  }
 
   useEffect(() => {
     fetchQuestions()
     const timer = setInterval(() => {
       setTimeRemaining(prev => {
         if (prev <= 1) {
-          handleSubmitAll()
+          finishRound()
           return 0
         }
         return prev - 1
@@ -62,12 +97,16 @@ function TechnicalInterview({ company, role, difficulty, onComplete }: Technical
     return () => clearInterval(timer)
   }, [])
 
+  // No generated prompts; hardcoded questions are returned directly.
+
   const fetchQuestions = async () => {
     try {
+      setLoadingInterview(true)
+      const client_id = getOrCreateClientId()
       const response = await fetch('http://localhost:8000/api/technical-questions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ company, role, difficulty })
+        body: JSON.stringify({ company, role, difficulty, client_id })
       })
       const data = await response.json()
       setQuestions(data.questions)
@@ -82,6 +121,8 @@ function TechnicalInterview({ company, role, difficulty, onComplete }: Technical
       setCode(initialCode)
     } catch (error) {
       console.error('Error fetching questions:', error)
+    } finally {
+      setLoadingInterview(false)
     }
   }
 
@@ -94,10 +135,26 @@ function TechnicalInterview({ company, role, difficulty, onComplete }: Technical
     def twoSum(self, nums: list[int], target: int) -> list[int]:
         # Your code here
         pass`,
+      'contains-duplicate': `class Solution:
+    def hasDuplicate(self, nums: list[int]) -> bool:
+        # Your code here
+        return False`,
+      'valid-anagram': `class Solution:
+    def isAnagram(self, s: str, t: str) -> bool:
+        # Your code here
+        return False`,
       'reverse-string': `class Solution:
     def reverseString(self, s: list[str]) -> None:
         # Your code here
         pass`,
+      'valid-palindrome': `class Solution:
+    def isPalindrome(self, s: str) -> bool:
+        # Your code here
+        return False`,
+      'best-time-stock': `class Solution:
+    def maxProfit(self, prices: list[int]) -> int:
+        # Your code here
+        return 0`,
       'palindrome-number': `class Solution:
     def isPalindrome(self, x: int) -> bool:
         # Your code here
@@ -114,10 +171,74 @@ function TechnicalInterview({ company, role, difficulty, onComplete }: Technical
     def isValid(self, s: str) -> bool:
         # Your code here
         return False`,
+      'longest-consecutive': `class Solution:
+    def longestConsecutive(self, nums: list[int]) -> int:
+        # Your code here
+        return 0`,
+      'three-sum': `class Solution:
+    def threeSum(self, nums: list[int]) -> list[list[int]]:
+        # Your code here
+        return []`,
+      'container-with-most-water': `class Solution:
+    def maxArea(self, heights: list[int]) -> int:
+        # Your code here
+        return 0`,
+      'find-min-rotated': `class Solution:
+    def findMin(self, nums: list[int]) -> int:
+        # Your code here
+        return 0`,
       'group-anagrams': `class Solution:
     def groupAnagrams(self, strs: list[str]) -> list[list[str]]:
         # Your code here
         return []`,
+      'top-k-frequent': `class Solution:
+    def topKFrequent(self, nums: list[int], k: int) -> list[int]:
+        # Your code here
+        return []`,
+      'minimum-window-substring': `class Solution:
+    def minWindow(self, s: str, t: str) -> str:
+        # Your code here
+        return ""`,
+      'reverse-linked-list': `# Definition for singly-linked list.
+# class ListNode:
+#     def __init__(self, val=0, next=None):
+#         self.val = val
+#         self.next = next
+
+class Solution:
+    def reverseList(self, head):
+        # Your code here
+        return head`,
+      'linked-list-cycle': `# Definition for singly-linked list.
+# class ListNode:
+#     def __init__(self, val=0, next=None):
+#         self.val = val
+#         self.next = next
+
+class Solution:
+    def hasCycle(self, head) -> bool:
+        # Your code here
+        return False`,
+      'reorder-list': `# Definition for singly-linked list.
+# class ListNode:
+#     def __init__(self, val=0, next=None):
+#         self.val = val
+#         self.next = next
+
+class Solution:
+    def reorderList(self, head) -> None:
+        # Your code here
+        pass`,
+      'merge-k-sorted-lists': `# Definition for singly-linked list.
+# class ListNode:
+#     def __init__(self, val=0, next=None):
+#         self.val = val
+#         self.next = next
+
+class Solution:
+    def mergeKLists(self, lists):
+        # Your code here
+        return None`,
       'product-except-self': `class Solution:
     def productExceptSelf(self, nums: list[int]) -> list[int]:
         # Your code here
@@ -128,29 +249,422 @@ function TechnicalInterview({ company, role, difficulty, onComplete }: Technical
         return []`
     }
 
+    const javascriptTemplates: { [key: string]: string } = {
+      'two-sum': `/**
+ * @param {number[]} nums
+ * @param {number} target
+ * @return {number[]}
+ */
+function twoSum(nums, target) {
+  // Your code here
+  return [];
+}`,
+      'contains-duplicate': `/**
+ * @param {number[]} nums
+ * @return {boolean}
+ */
+function hasDuplicate(nums) {
+  // Your code here
+  return false;
+}`,
+      'valid-anagram': `/**
+ * @param {string} s
+ * @param {string} t
+ * @return {boolean}
+ */
+function isAnagram(s, t) {
+  // Your code here
+  return false;
+}`,
+      'valid-palindrome': `/**
+ * @param {string} s
+ * @return {boolean}
+ */
+function isPalindrome(s) {
+  // Your code here
+  return false;
+}`,
+      'best-time-stock': `/**
+ * @param {number[]} prices
+ * @return {number}
+ */
+function maxProfit(prices) {
+  // Your code here
+  return 0;
+}`,
+      'group-anagrams': `/**
+ * @param {string[]} strs
+ * @return {string[][]}
+ */
+function groupAnagrams(strs) {
+  // Your code here
+  return [];
+}`,
+      'top-k-frequent': `/**
+ * @param {number[]} nums
+ * @param {number} k
+ * @return {number[]}
+ */
+function topKFrequent(nums, k) {
+  // Your code here
+  return [];
+}`,
+      'longest-consecutive': `/**
+ * @param {number[]} nums
+ * @return {number}
+ */
+function longestConsecutive(nums) {
+  // Your code here
+  return 0;
+}`,
+      'three-sum': `/**
+ * @param {number[]} nums
+ * @return {number[][]}
+ */
+function threeSum(nums) {
+  // Your code here
+  return [];
+}`,
+      'container-with-most-water': `/**
+ * @param {number[]} heights
+ * @return {number}
+ */
+function maxArea(heights) {
+  // Your code here
+  return 0;
+}`,
+      'find-min-rotated': `/**
+ * @param {number[]} nums
+ * @return {number}
+ */
+function findMin(nums) {
+  // Your code here
+  return 0;
+}`,
+      'minimum-window-substring': `/**
+ * @param {string} s
+ * @param {string} t
+ * @return {string}
+ */
+function minWindow(s, t) {
+  // Your code here
+  return "";
+}`,
+      'reverse-linked-list': `// Linked-list question: autograding is Python-only right now.
+// Provided for convenience.
+`,
+      'linked-list-cycle': `// Linked-list question: autograding is Python-only right now.
+// Provided for convenience.
+`,
+      'reorder-list': `// Linked-list question: autograding is Python-only right now.
+// Provided for convenience.
+`,
+      'merge-k-sorted-lists': `// Linked-list question: autograding is Python-only right now.
+// Provided for convenience.
+`,
+    }
+
+    const javaTemplates: { [key: string]: string } = {
+      'two-sum': `class Solution {
+    public int[] twoSum(int[] nums, int target) {
+        // Your code here
+        return new int[0];
+    }
+}`,
+      'contains-duplicate': `class Solution {
+    public boolean hasDuplicate(int[] nums) {
+        // Your code here
+        return false;
+    }
+}`,
+      'valid-anagram': `class Solution {
+    public boolean isAnagram(String s, String t) {
+        // Your code here
+        return false;
+    }
+}`,
+      'valid-palindrome': `class Solution {
+    public boolean isPalindrome(String s) {
+      // Your code here
+      return false;
+    }
+  }`,
+      'best-time-stock': `class Solution {
+    public int maxProfit(int[] prices) {
+      // Your code here
+      return 0;
+    }
+  }`,
+      'longest-consecutive': `import java.util.*;
+
+  class Solution {
+    public int longestConsecutive(int[] nums) {
+      // Your code here
+      return 0;
+    }
+  }`,
+      'three-sum': `import java.util.*;
+
+  class Solution {
+    public List<List<Integer>> threeSum(int[] nums) {
+      // Your code here
+      return new ArrayList<>();
+    }
+  }`,
+      'container-with-most-water': `class Solution {
+    public int maxArea(int[] heights) {
+      // Your code here
+      return 0;
+    }
+  }`,
+      'find-min-rotated': `class Solution {
+    public int findMin(int[] nums) {
+      // Your code here
+      return 0;
+    }
+  }`,
+      'group-anagrams': `import java.util.*;
+
+class Solution {
+    public List<List<String>> groupAnagrams(String[] strs) {
+        // Your code here
+        return new ArrayList<>();
+    }
+}`,
+      'top-k-frequent': `class Solution {
+    public int[] topKFrequent(int[] nums, int k) {
+        // Your code here
+        return new int[0];
+    }
+}`,
+      'minimum-window-substring': `import java.util.*;
+
+    class Solution {
+        public String minWindow(String s, String t) {
+        // Your code here
+        return "";
+        }
+    }`,
+      'reverse-linked-list': `// Linked-list question: autograding is Python-only right now.
+    // Provided for convenience.
+    `,
+      'linked-list-cycle': `// Linked-list question: autograding is Python-only right now.
+    // Provided for convenience.
+    `,
+      'reorder-list': `// Linked-list question: autograding is Python-only right now.
+    // Provided for convenience.
+    `,
+      'merge-k-sorted-lists': `// Linked-list question: autograding is Python-only right now.
+    // Provided for convenience.
+    `,
+    }
+
+    const cppTemplates: { [key: string]: string } = {
+      'two-sum': `#include <bits/stdc++.h>
+using namespace std;
+
+class Solution {
+public:
+    vector<int> twoSum(vector<int>& nums, int target) {
+        // Your code here
+        return {};
+    }
+};`,
+      'contains-duplicate': `#include <bits/stdc++.h>
+using namespace std;
+
+class Solution {
+public:
+    bool hasDuplicate(vector<int>& nums) {
+        // Your code here
+        return false;
+    }
+};`,
+      'valid-anagram': `#include <bits/stdc++.h>
+using namespace std;
+
+class Solution {
+public:
+    bool isAnagram(string s, string t) {
+        // Your code here
+        return false;
+    }
+};`,
+      'valid-palindrome': `#include <bits/stdc++.h>
+  using namespace std;
+
+  class Solution {
+  public:
+    bool isPalindrome(string s) {
+      // Your code here
+      return false;
+    }
+  };`,
+      'best-time-stock': `#include <bits/stdc++.h>
+  using namespace std;
+
+  class Solution {
+  public:
+    int maxProfit(vector<int>& prices) {
+      // Your code here
+      return 0;
+    }
+  };`,
+      'longest-consecutive': `#include <bits/stdc++.h>
+  using namespace std;
+
+  class Solution {
+  public:
+    int longestConsecutive(vector<int>& nums) {
+      // Your code here
+      return 0;
+    }
+  };`,
+      'three-sum': `#include <bits/stdc++.h>
+  using namespace std;
+
+  class Solution {
+  public:
+    vector<vector<int>> threeSum(vector<int>& nums) {
+      // Your code here
+      return {};
+    }
+  };`,
+      'container-with-most-water': `#include <bits/stdc++.h>
+  using namespace std;
+
+  class Solution {
+  public:
+    int maxArea(vector<int>& heights) {
+      // Your code here
+      return 0;
+    }
+  };`,
+      'find-min-rotated': `#include <bits/stdc++.h>
+  using namespace std;
+
+  class Solution {
+  public:
+    int findMin(vector<int>& nums) {
+      // Your code here
+      return 0;
+    }
+  };`,
+      'group-anagrams': `#include <bits/stdc++.h>
+using namespace std;
+
+class Solution {
+public:
+    vector<vector<string>> groupAnagrams(vector<string>& strs) {
+        // Your code here
+        return {};
+    }
+};`,
+      'top-k-frequent': `#include <bits/stdc++.h>
+using namespace std;
+
+class Solution {
+public:
+    vector<int> topKFrequent(vector<int>& nums, int k) {
+        // Your code here
+        return {};
+    }
+};`,
+      'minimum-window-substring': `#include <bits/stdc++.h>
+    using namespace std;
+
+    class Solution {
+    public:
+        string minWindow(string s, string t) {
+        // Your code here
+        return "";
+        }
+    };`,
+      'reverse-linked-list': `// Linked-list question: autograding is Python-only right now.
+    // Provided for convenience.
+    `,
+      'linked-list-cycle': `// Linked-list question: autograding is Python-only right now.
+    // Provided for convenience.
+    `,
+      'reorder-list': `// Linked-list question: autograding is Python-only right now.
+    // Provided for convenience.
+    `,
+      'merge-k-sorted-lists': `// Linked-list question: autograding is Python-only right now.
+    // Provided for convenience.
+    `,
+    }
+
+    const cTemplates: { [key: string]: string } = {
+      'two-sum': `// Note: In C, returning dynamic arrays requires manual allocation.
+// This stub is illustrative; autograding supports Python/JavaScript only.
+`,
+      'contains-duplicate': `// Note: In C, sets/hashes require custom implementation.
+// This stub is illustrative; autograding supports Python/JavaScript only.
+`,
+      'valid-anagram': `// Note: In C, strings are char arrays; sorting/counting requires manual work.
+// This stub is illustrative; autograding supports Python/JavaScript only.
+`,
+      'valid-palindrome': `// Note: In C, you'd typically use two pointers and isalnum/tolower.
+    // This stub is illustrative; autograding supports Python/JavaScript only.
+    `,
+      'best-time-stock': `// Note: In C, loop once tracking min and best profit.
+    // This stub is illustrative; autograding supports Python/JavaScript only.
+    `,
+      'longest-consecutive': `// Note: In C, O(n) usually requires a hash set implementation.
+    // This stub is illustrative; autograding supports Python/JavaScript only.
+    `,
+      'three-sum': `// Note: In C, sort + two pointers; returning 2D arrays requires manual allocation.
+    // This stub is illustrative; autograding supports Python/JavaScript only.
+    `,
+      'container-with-most-water': `// Note: In C, two-pointer approach.
+    // This stub is illustrative; autograding supports Python/JavaScript only.
+    `,
+      'find-min-rotated': `// Note: In C, binary search.
+    // This stub is illustrative; autograding supports Python/JavaScript only.
+    `,
+      'group-anagrams': `// Note: In C, returning 2D arrays/strings requires manual allocation.
+// This stub is illustrative; autograding supports Python/JavaScript only.
+`,
+      'top-k-frequent': `// Note: In C, heaps/maps require custom implementation.
+// This stub is illustrative; autograding supports Python/JavaScript only.
+`,
+      'minimum-window-substring': `// Note: In C, sliding window with counts.
+    // This stub is illustrative; autograding supports Python/JavaScript only.
+    `,
+      'reverse-linked-list': `// Linked-list question: autograding is Python-only right now.
+    `,
+      'linked-list-cycle': `// Linked-list question: autograding is Python-only right now.
+    `,
+      'reorder-list': `// Linked-list question: autograding is Python-only right now.
+    `,
+      'merge-k-sorted-lists': `// Linked-list question: autograding is Python-only right now.
+    `,
+    }
+
     const templates: { [key in Language]: string } = {
       python: pythonTemplates[questionId] || `class Solution:
     def solution(self, input):
+        # input is a dict/object for generated problems
         # Your code here
-        return input`,
-      javascript: `function solution(input) {
+        return None`,
+      javascript: javascriptTemplates[questionId] || `function solution(input) {
     // Your code here
-    return input;
+    return null;
 }`,
-      java: `class Solution {
+      java: javaTemplates[questionId] || `class Solution {
     public int solution(int[] input) {
         // Your code here
         return 0;
     }
 }`,
-      cpp: `class Solution {
+      cpp: cppTemplates[questionId] || `class Solution {
 public:
     int solution(vector<int>& input) {
         // Your code here
         return 0;
     }
 };`,
-      c: `int solution(int* input, int inputSize) {
+      c: cTemplates[questionId] || `int solution(int* input, int inputSize) {
     // Your code here
     return 0;
 }`
@@ -178,117 +692,50 @@ public:
     }
   }
 
-  const handleRunCode = async (questionId: string) => {
-    setLoading(true)
-    // Clear previous results immediately
-    setResults(prev => ({
-      ...prev,
-      [questionId]: {
-        passed: false,
-        score: 0,
-        testResults: []
-      }
-    }))
+  const gradeCurrent = async (mode: 'run' | 'submit') => {
+    const q = questions[currentQuestionIndex]
+    if (!q) return
 
     try {
-      const currentCode = code[questionId]?.[selectedLanguage] || ''
+      setGradingLoading(true)
+      setGradingErrorById(prev => ({ ...prev, [q.id]: null }))
+
+      const currentCodeToRun = code[q.id]?.[selectedLanguage] || ''
       const response = await fetch('http://localhost:8000/api/run-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          code: currentCode,
-          question_id: questionId,
+          code: currentCodeToRun,
+          question_id: q.id,
           language: selectedLanguage,
-          run_mode: 'run'  // Only run sample test cases
+          run_mode: mode
         })
       })
       const data = await response.json()
-      setResults(prev => ({
-        ...prev,
-        [questionId]: {
-          passed: data.passed || false,
-          score: data.score || 0,
-          testResults: data.test_results || []
-        }
-      }))
-    } catch (error) {
-      console.error('Error running code:', error)
-      alert(`Error running code: ${error}. Make sure the backend is running on http://localhost:8000`)
-      setResults(prev => ({
-        ...prev,
-        [questionId]: {
-          passed: false,
-          score: 0,
-          testResults: []
-        }
-      }))
+      if (!response.ok) {
+        throw new Error(data?.detail || 'Failed to grade')
+      }
+      setGradeResultById(prev => ({ ...prev, [q.id]: data }))
+
+      if (mode === 'submit' && data?.passed) {
+        setSolved(prev => ({ ...prev, [q.id]: true }))
+      }
+    } catch (e: any) {
+      setGradingErrorById(prev => ({ ...prev, [q.id]: e?.message || 'Failed to grade' }))
     } finally {
-      setLoading(false)
+      setGradingLoading(false)
     }
   }
 
-  const handleSubmitQuestion = async (questionId: string) => {
-    // Submit individual question (final submission with all test cases)
-    setLoading(true)
-    // Clear previous results immediately
-    setResults(prev => ({
-      ...prev,
-      [questionId]: {
-        passed: false,
-        score: 0,
-        testResults: []
-      }
-    }))
-
-    try {
-      const currentCode = code[questionId]?.[selectedLanguage] || ''
-      const response = await fetch('http://localhost:8000/api/run-code', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          code: currentCode,
-          question_id: questionId,
-          language: selectedLanguage,
-          run_mode: 'submit'  // Run ALL test cases including hidden ones
-        })
-      })
-      const data = await response.json()
-      setResults(prev => ({
-        ...prev,
-        [questionId]: {
-          passed: data.passed || false,
-          score: data.score || 0,
-          testResults: data.test_results || [],
-          submitted: true
-        }
-      }))
-    } catch (error) {
-      console.error('Error submitting code:', error)
-      setResults(prev => ({
-        ...prev,
-        [questionId]: { 
-          passed: false, 
-          score: 0,
-          submitted: true,
-          testResults: []
-        }
-      }))
-    } finally {
-      setLoading(false)
-    }
+  const toggleSolved = (questionId: string) => {
+    setSolved((prev) => ({ ...prev, [questionId]: !prev[questionId] }))
   }
 
-  const handleSubmitAll = async () => {
-    setLoading(true)
-    let totalScore = 0
-    for (const q of questions) {
-      if (!results[q.id]) {
-        await handleRunCode(q.id)
-      }
-      totalScore += results[q.id]?.score || 0
-    }
-    const averageScore = totalScore / questions.length
-    onComplete(averageScore)
+  const finishRound = () => {
+    const ids = questionsRef.current.map((q) => q.id)
+    const solvedCount = ids.filter((id) => solvedRef.current[id]).length
+    const pct = ids.length ? (solvedCount / ids.length) * 100 : 0
+    onComplete(pct)
   }
 
   const handleEditorChange = (value: string | undefined) => {
@@ -308,6 +755,30 @@ public:
 
   const currentQuestion = questions[currentQuestionIndex]
   const currentCode = code[currentQuestion?.id]?.[selectedLanguage] || getDefaultCode(currentQuestion || {} as Question, selectedLanguage)
+  const gradeResult = currentQuestion ? gradeResultById[currentQuestion.id] : null
+  const gradeError = currentQuestion ? gradingErrorById[currentQuestion.id] : null
+
+  const jsUnsupportedFor = new Set([
+    'reverse-linked-list',
+    'linked-list-cycle',
+    'reorder-list',
+    'merge-k-sorted-lists'
+  ])
+  const autogradeSupported =
+    selectedLanguage === 'python' ||
+    (selectedLanguage === 'javascript' && !jsUnsupportedFor.has(currentQuestion?.id || ''))
+
+  if (loadingInterview || questions.length === 0) {
+    return (
+      <div className="technical-loading-overlay">
+        <div className="technical-loading-card">
+          <div className="technical-loading-spinner" />
+          <div className="technical-loading-title">Loading your technical interview…</div>
+          <div className="technical-loading-subtitle">Loading questions and preparing the editor.</div>
+        </div>
+      </div>
+    )
+  }
 
   if (questions.length === 0) {
     return <div className="technical-interview">Loading questions...</div>
@@ -333,38 +804,64 @@ public:
               {currentQuestion.difficulty}
             </span>
           </div>
-          <div className="question-description" dangerouslySetInnerHTML={{ __html: currentQuestion.description.replace(/\n/g, '<br/>') }} />
-          
-          <div className="examples-section">
-            <h3 className="section-title">Examples:</h3>
-            {currentQuestion.examples.map((example, idx) => (
-              <div key={idx} className="example">
-                <div className="example-label">Example {idx + 1}:</div>
-                <div className="example-content">
-                  <div className="example-input">
-                    <strong>Input:</strong> <code>{example.input}</code>
-                  </div>
-                  <div className="example-output">
-                    <strong>Output:</strong> <code>{example.output}</code>
-                  </div>
-                  {example.explanation && (
-                    <div className="example-explanation">
-                      <strong>Explanation:</strong> {example.explanation}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
+
+          <div className="question-description">
+            <div className="generated-prompt">{currentQuestion.description || ''}</div>
           </div>
 
-          <div className="constraints-section">
-            <h3 className="section-title">Constraints:</h3>
-            <ul>
-              {currentQuestion.constraints.map((constraint, idx) => (
-                <li key={idx}><code>{constraint}</code></li>
-              ))}
-            </ul>
+          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
+            <button className="run-button" onClick={() => gradeCurrent('run')} disabled={gradingLoading || !autogradeSupported}>
+              {gradingLoading ? 'Running…' : 'Run'}
+            </button>
+            <button className="submit-button-header" onClick={() => gradeCurrent('submit')} disabled={gradingLoading || !autogradeSupported}>
+              {gradingLoading ? 'Submitting…' : 'Submit'}
+            </button>
           </div>
+
+          {!autogradeSupported ? (
+            <div style={{ marginTop: '0.5rem', opacity: 0.85, fontSize: '0.9rem' }}>
+              Autograding currently supports Python and JavaScript only.
+            </div>
+          ) : null}
+
+          {(currentQuestion.examples?.length ?? 0) > 0 ? (
+            <div className="examples-section">
+              <h3 className="section-title">Examples:</h3>
+              {(currentQuestion.examples ?? []).slice(0, 3).map((ex, idx) => (
+                <div className="example" key={idx}>
+                  <div className="example-label">Example {idx + 1}</div>
+                  <div className="example-content">
+                    <div className="example-input">
+                      <strong>Input:</strong>
+                      <pre><code>{ex.input}</code></pre>
+                    </div>
+                    <div className="example-output">
+                      <strong>Output:</strong>
+                      <pre><code>{ex.output}</code></pre>
+                    </div>
+                    {ex.explanation && (
+                      <div className="example-explanation">
+                        <strong>Explanation:</strong> {ex.explanation}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {(currentQuestion.constraints?.length ?? 0) > 0 ? (
+            <div className="constraints-section">
+              <h3 className="section-title">Constraints:</h3>
+              <ul>
+                {(currentQuestion.constraints ?? []).slice(0, 12).map((c, idx) => (
+                  <li key={idx}>{c}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {null}
         </div>
 
         <div className="code-panel">
@@ -397,18 +894,18 @@ public:
                 📋 Copy
               </button>
               <button
-                onClick={() => handleRunCode(currentQuestion.id)}
-                disabled={loading}
+                onClick={() => gradeCurrent('run')}
                 className="run-button"
+                disabled={gradingLoading}
               >
-                {loading ? 'Running...' : '▶ Run'}
+                {gradingLoading ? 'Running…' : 'Run'}
               </button>
               <button
-                onClick={() => handleSubmitQuestion(currentQuestion.id)}
-                disabled={loading}
+                onClick={() => gradeCurrent('submit')}
                 className="submit-button-header"
+                disabled={gradingLoading}
               >
-                ✓ Submit
+                {gradingLoading ? 'Submitting…' : 'Submit'}
               </button>
             </div>
           </div>
@@ -436,63 +933,53 @@ public:
               }}
             />
           </div>
-          {results[currentQuestion.id] && (
-            <div className={`test-results ${results[currentQuestion.id].passed ? 'passed' : 'failed'}`}>
+
+          {(gradeError || gradeResult) && (
+            <div className={`test-results ${gradeResult?.passed ? 'passed' : 'failed'}`}>
               <div className="result-header">
-                {results[currentQuestion.id].passed ? (
-                  <span className="result-icon success">✓</span>
-                ) : (
-                  <span className="result-icon error">✗</span>
-                )}
+                <span className={`result-icon ${gradeResult?.passed ? 'success' : 'error'}`}>
+                  {gradeResult?.passed ? '✓' : '✕'}
+                </span>
                 <span className="result-text">
-                  {results[currentQuestion.id].passed
-                    ? `Accepted`
-                    : `Wrong Answer`}
+                  {gradeError ? gradeError : gradeResult?.passed ? 'All tests passed' : 'Some tests failed'}
                 </span>
-                <span className="result-score-inline">
-                  {results[currentQuestion.id].testResults?.filter((t) => t.passed).length || 0} / {results[currentQuestion.id].testResults?.length || 0} test cases passed
-                </span>
+                {gradeResult && (
+                  <span className="result-score-inline">Score: {gradeResult.score}%</span>
+                )}
               </div>
 
-              {/* Show all test case results */}
-              {results[currentQuestion.id]?.testResults && results[currentQuestion.id]?.testResults.length > 0 && (
-                <div className="test-cases-container">
-                  <div className="test-cases-header">Test Cases:</div>
-                  {results[currentQuestion.id].testResults?.map((test, idx) => (
-                    <div key={idx} className={`test-case ${test.passed ? 'test-case-passed' : 'test-case-failed'}`}>
-                      <div className="test-case-header">
-                        <span className="test-case-number">Case {test.test_case}</span>
-                        <span className={`test-case-status ${test.passed ? 'status-passed' : 'status-failed'}`}>
-                          {test.passed ? '✓ Passed' : '✗ Failed'}
-                        </span>
-                      </div>
-                      <div className="test-case-details">
-                        <div className="test-input">
-                          <strong>Input:</strong> <code>{JSON.stringify(test.input)}</code>
-                        </div>
-                        <div className="test-expected">
-                          <strong>Expected:</strong> <code>{JSON.stringify(test.expected_output)}</code>
-                        </div>
-                        <div className="test-actual">
-                          <strong>Output:</strong> <code className={test.passed ? 'output-correct' : 'output-wrong'}>
-                            {test.error ? test.error : JSON.stringify(test.actual_output)}
-                          </code>
-                        </div>
-                        {test.error && (
-                          <div className="test-error">
-                            <strong>Error:</strong> <span className="error-message">{test.error}</span>
+              {gradeResult && (
+                <>
+                  <div className="result-summary">
+                    <span className="summary-label">Passed:</span>
+                    <span className="summary-value">
+                      {gradeResult.passed_tests}/{gradeResult.total_tests}
+                    </span>
+                  </div>
+
+                  <div className="test-cases-container">
+                    <div className="test-cases-header">Test cases</div>
+                    {gradeResult.test_results.slice(0, 12).map((tr) => (
+                      <div
+                        key={tr.test_case}
+                        className={`test-case ${tr.passed ? 'test-case-passed' : 'test-case-failed'}`}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem' }}>
+                          <div style={{ fontWeight: 600 }}>
+                            Test {tr.test_case}: {tr.passed ? 'Passed' : 'Failed'}
                           </div>
-                        )}
+                          {tr.error && <div style={{ color: '#dc2626' }}>{tr.error}</div>}
+                        </div>
+                        <div style={{ marginTop: '0.5rem', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+                          <div><strong>Input:</strong> <code>{JSON.stringify(tr.input)}</code></div>
+                          <div><strong>Expected:</strong> <code>{JSON.stringify(tr.expected_output)}</code></div>
+                          <div><strong>Actual:</strong> <code>{JSON.stringify(tr.actual_output)}</code></div>
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                </>
               )}
-
-              <div className="result-summary">
-                <span className="summary-label">Score:</span>
-                <span className="summary-value">{results[currentQuestion.id]?.score ? results[currentQuestion.id].score.toFixed(1) : '0.0'}%</span>
-              </div>
             </div>
           )}
         </div>
@@ -511,7 +998,7 @@ public:
             <button
               key={idx}
               onClick={() => setCurrentQuestionIndex(idx)}
-              className={`dot ${idx === currentQuestionIndex ? 'active' : ''} ${results[questions[idx].id]?.passed ? 'completed' : ''}`}
+              className={`dot ${idx === currentQuestionIndex ? 'active' : ''} ${solved[questions[idx].id] ? 'completed' : ''}`}
               title={`Question ${idx + 1}`}
             />
           ))}
@@ -525,11 +1012,10 @@ public:
           </button>
         ) : (
           <button
-            onClick={handleSubmitAll}
-            disabled={loading}
+            onClick={finishRound}
             className="submit-button"
           >
-            {loading ? 'Submitting...' : 'Submit All'}
+            Finish Round
           </button>
         )}
       </div>

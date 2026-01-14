@@ -7,30 +7,7 @@
   transition: background 0.3s ease;
 }
 
-.page::before {
-  content: '';
-  position: absolute;
-  width: 500px;
-  height: 500px;
-  background: radial-gradient(circle, rgba(99, 102, 241, 0.08) 0%, transparent 70%);
-  top: -200px;
-  right: -200px;
-  animation: float 20s ease-in-out infinite;
-  opacity: 0.5;
-}
 
-.page::after {
-  content: '';
-  position: absolute;
-  width: 400px;
-  height: 400px;
-  background: radial-gradient(circle, rgba(168, 85, 247, 0.06) 0%, transparent 70%);
-  bottom: -150px;
-  left: -150px;
-  animation: float 15s ease-in-out infinite reverse;
-  z-index: 0;
-  opacity: 0.5;
-}
 
 [data-theme='light'] .page::before,
 [data-theme='light'] .page::after {
@@ -129,13 +106,13 @@
 
 .text-input {
   width: 100%;
-  padding: 0.75rem;
+  padding: 0.75rem 1rem;
   border: 1px solid var(--border-color);
   border-radius: 6px;
   font-size: 0.9375rem;
   transition: all 0.2s ease;
   box-sizing: border-box;
-  background: var(--card-bg-solid);
+  background: var(--bg-primary);
   color: var(--text-primary);
 }
 
@@ -143,10 +120,14 @@
   color: var(--text-tertiary);
 }
 
+.text-input:hover {
+  border-color: var(--border-light);
+}
+
 .text-input:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
 }
 
 .file-upload {
@@ -553,6 +534,28 @@
   font-size: 0.8125rem;
   color: var(--text-tertiary);
   margin-top: 0.5rem;
+}
+
+.job-apply-button {
+  padding: 0.45rem 0.85rem;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  background: var(--card-bg);
+  color: var(--text-primary);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.job-apply-button:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.14);
+}
+
+.job-apply-button:active {
+  transform: translateY(0);
 }
 
 .resume-upload-section {

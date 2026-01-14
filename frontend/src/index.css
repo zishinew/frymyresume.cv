@@ -17,41 +17,51 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Dark theme (default) */
+/* Dark theme (default) - Minimalist */
 :root,
 [data-theme='dark'] {
-  --bg-primary: #0a0a0a;
+  --bg-primary: #0f0f0f;
   --bg-secondary: #1a1a1a;
-  --card-bg: rgba(26, 26, 26, 0.6);
+  --card-bg: #1a1a1a;
   --card-bg-solid: #1a1a1a;
+  --card-border: #2a2a2a;
   --text-primary: #ffffff;
-  --text-secondary: #a0a0a0;
+  --text-secondary: #a3a3a3;
   --text-tertiary: #737373;
-  --border-color: #333333;
-  --border-light: #444444;
-  --accent: #6366f1;
-  --accent-hover: #4f46e5;
-  --success: #22c55e;
-  --error: #dc2626;
-  --warning: #fbbf24;
+  --border-color: #2a2a2a;
+  --border-light: #3a3a3a;
+  --accent: #ef4444;
+  --accent-hover: #dc2626;
+  --accent-light: #f87171;
+  --success: #10b981;
+  --error: #ef4444;
+  --warning: #f59e0b;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.2);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.2);
 }
 
-/* Light theme */
+/* Light theme - Minimalist */
 [data-theme='light'] {
-  --bg-primary: #fafafa;
-  --bg-secondary: #ffffff;
-  --card-bg: rgba(255, 255, 255, 0.8);
+  --bg-primary: #ffffff;
+  --bg-secondary: #f9fafb;
+  --card-bg: #ffffff;
   --card-bg-solid: #ffffff;
-  --text-primary: #1a1a1a;
-  --text-secondary: #525252;
-  --text-tertiary: #737373;
-  --border-color: #e5e5e5;
-  --border-light: #d4d4d4;
-  --accent: #6366f1;
-  --accent-hover: #4f46e5;
-  --success: #16a34a;
-  --error: #dc2626;
+  --card-border: #e5e7eb;
+  --text-primary: #111827;
+  --text-secondary: #6b7280;
+  --text-tertiary: #9ca3af;
+  --border-color: #e5e7eb;
+  --border-light: #d1d5db;
+  --accent: #ef4444;
+  --accent-hover: #dc2626;
+  --accent-light: #f87171;
+  --success: #10b981;
+  --error: #ef4444;
   --warning: #f59e0b;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
 }
 
 body {
@@ -60,7 +70,7 @@ body {
   min-height: 100vh;
   background: var(--bg-primary);
   color: var(--text-primary);
-  transition: background-color 0.3s ease, color 0.3s ease;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 #root {

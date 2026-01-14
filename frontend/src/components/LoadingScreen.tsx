@@ -1,6 +1,6 @@
 import './LoadingScreen.css'
 
-function LoadingScreen() {
+function LoadingScreen({ text }: { text?: string }) {
   return (
     <div className="loading-screen">
       <div className="loading-content">
@@ -9,7 +9,7 @@ function LoadingScreen() {
           <span></span>
           <span></span>
         </div>
-        <p className="loading-text">Your resume is being read by recruiters...</p>
+        <p className="loading-text">{text || 'Your resume is being read by recruiters...'}</p>
       </div>
     </div>
   )

@@ -41,11 +41,12 @@
 }
 
 .question-display {
-  background: var(--card-bg-solid);
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
   padding: 2rem;
   margin-bottom: 2rem;
+  box-shadow: var(--shadow-sm);
 }
 
 .question-display h2 {
@@ -95,11 +96,11 @@
 
 .record-button,
 .stop-button {
-  padding: 1rem 2rem;
+  padding: 0.875rem 2rem;
   font-size: 1rem;
   font-weight: 500;
   border: none;
-  border-radius: 8px;
+  border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -107,19 +108,25 @@
 .record-button {
   background: var(--accent);
   color: white;
+  box-shadow: var(--shadow-sm);
 }
 
 .record-button:hover {
   background: var(--accent-hover);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
 }
 
 .stop-button {
   background: var(--error);
   color: white;
+  box-shadow: var(--shadow-sm);
 }
 
 .stop-button:hover {
-  background: #b91c1c;
+  background: #dc2626;
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
 }
 
 .playing-indicator {

@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
 import './BehavioralInterview.css'
+import LoadingScreen from './LoadingScreen'
 
 interface BehavioralInterviewLiveProps {
   company: string
   role: string
-  onComplete: (score: number) => void
+  onComplete: (score: number, meta?: { disqualified?: boolean; flags?: any; scoring_version?: string }) => void
 }
 
 function BehavioralInterviewLive({ company, role, onComplete }: BehavioralInterviewLiveProps) {
@@ -16,6 +17,7 @@ function BehavioralInterviewLive({ company, role, onComplete }: BehavioralInterv
   const [totalQuestions] = useState(3)
   const [interviewStarted, setInterviewStarted] = useState(false)
   const [userTranscript, setUserTranscript] = useState<string>('')
+  const [isReviewing, setIsReviewing] = useState(false)
 
   const wsRef = useRef<WebSocket | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
@@ -185,16 +187,30 @@ function BehavioralInterviewLive({ company, role, onComplete }: BehavioralInterv
             }
             break
 
+          case 'reviewing':
+            // Backend has started final evaluation.
+            setIsReviewing(true)
+            if (isListeningRef.current) {
+              stopListening(false, true)
+            }
+            break
+
           case 'interview_complete':
             // Interview finished
             console.log('Interview complete with score:', message.score)
+            setIsReviewing(false)
             interviewEndedRef.current = true
-            onComplete(message.score)
+            onComplete(message.score, {
+              disqualified: message.disqualified,
+              flags: message.flags,
+              scoring_version: message.scoring_version
+            })
             cleanup()
             break
 
           case 'error':
             setError(message.message)
+            setIsReviewing(false)
             console.error('Error from server:', message.message)
             break
         }
@@ -496,13 +512,14 @@ function BehavioralInterviewLive({ company, role, onComplete }: BehavioralInterv
 
   return (
     <div className="behavioral-interview">
+      {isReviewing && <LoadingScreen text="Your interview is being reviewed..." />}
       <div className="interview-status">
         <div className="question-number">Question {questionIndex + 1} of {totalQuestions}</div>
         <div className="recording-indicator">
           {!isConnected && <span>Connecting...</span>}
           {isConnected && !interviewStarted && <span>Starting interview...</span>}
           {isListening && <span className="recording-dot"></span>}
-          {isConnected && (isListening ? 'Speaking...' : 'Waiting for your turn...')}
+          {isConnected && (isReviewing ? 'Reviewing...' : (isListening ? 'Speaking...' : 'Waiting for your turn...'))}
         </div>
       </div>
 

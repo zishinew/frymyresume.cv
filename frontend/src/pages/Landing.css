@@ -5,27 +5,7 @@
   position: relative;
 }
 
-.landing::before {
-  content: '';
-  position: absolute;
-  width: 500px;
-  height: 500px;
-  background: radial-gradient(circle, rgba(99, 102, 241, 0.08) 0%, transparent 70%);
-  top: -250px;
-  right: -250px;
-  opacity: 0.5;
-}
 
-.landing::after {
-  content: '';
-  position: absolute;
-  width: 400px;
-  height: 400px;
-  background: radial-gradient(circle, rgba(168, 85, 247, 0.06) 0%, transparent 70%);
-  bottom: -200px;
-  left: -200px;
-  opacity: 0.5;
-}
 
 [data-theme='light'] .landing::before,
 [data-theme='light'] .landing::after {
@@ -72,11 +52,11 @@
 .brand-title {
   font-family: 'Poppins', sans-serif;
   font-size: 5rem;
-  font-weight: 800;
+  font-weight: 700;
   color: var(--text-primary);
   margin-bottom: 1.5rem;
-  letter-spacing: -0.04em;
-  border-bottom: 4px solid var(--accent);
+  letter-spacing: -0.03em;
+  border-bottom: 3px solid var(--accent);
   padding-bottom: 1rem;
   display: inline-block;
 }
@@ -126,38 +106,37 @@
 }
 
 .cta-primary, .cta-secondary {
-  padding: 1rem 2rem;
-  border-radius: 8px;
+  padding: 0.875rem 2rem;
+  border-radius: 6px;
   font-size: 0.9375rem;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.2s ease;
   border: none;
-  position: relative;
-  overflow: hidden;
 }
 
 .cta-primary {
   background: var(--accent);
   color: white;
+  box-shadow: var(--shadow-sm);
 }
 
 .cta-primary:hover {
   background: var(--accent-hover);
-  transform: translateY(-2px);
-  box-shadow: 0 10px 25px rgba(99, 102, 241, 0.2);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
 }
 
 .cta-secondary {
   background: transparent;
+  border: 1.5px solid var(--border-light);
   color: var(--text-primary);
-  border: 1px solid var(--border-color);
 }
 
 .cta-secondary:hover {
-  border-color: var(--text-primary);
-  background: var(--card-bg);
-  transform: translateY(-2px);
+  border-color: var(--accent);
+  color: var(--accent);
+  transform: translateY(-1px);
 }
 
 .landing-stats {

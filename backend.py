@@ -14,7 +14,7 @@ import json
 from datetime import date
 from google import genai
 from dotenv import load_dotenv
-from typing import Optional
+from typing import Optional, Any
 
 load_dotenv()
 
@@ -39,6 +39,832 @@ if not GEMINI_API_KEY:
 
 # Session storage for behavioral interviews
 interview_sessions = {}
+
+# In-memory storage for AI-generated technical problems (prompt + tests)
+_generated_technical_sessions: dict[str, dict] = {}
+_generated_technical_session_index: dict[str, str] = {}
+
+
+def _prune_generated_technical_sessions(max_age_seconds: int = 6 * 60 * 60, max_sessions: int = 250) -> None:
+    """Best-effort pruning to keep memory bounded."""
+    now = time.time()
+    # Drop old sessions
+    old_ids = [
+        sid
+        for sid, sess in _generated_technical_sessions.items()
+        if (now - float(sess.get("created_at", now))) > max_age_seconds
+    ]
+    for sid in old_ids:
+        _generated_technical_sessions.pop(sid, None)
+
+    # Drop index entries that point to missing sessions
+    for key, sid in list(_generated_technical_session_index.items()):
+        if sid not in _generated_technical_sessions:
+            _generated_technical_session_index.pop(key, None)
+
+    # If still too many, drop oldest
+    if len(_generated_technical_sessions) > max_sessions:
+        ordered = sorted(
+            _generated_technical_sessions.items(),
+            key=lambda kv: float(kv[1].get("created_at", 0.0)),
+        )
+        for sid, _sess in ordered[: max(0, len(ordered) - max_sessions)]:
+            _generated_technical_sessions.pop(sid, None)
+        for key, sid in list(_generated_technical_session_index.items()):
+            if sid not in _generated_technical_sessions:
+                _generated_technical_session_index.pop(key, None)
+
+
+def _extract_first_json_object(text: str) -> dict:
+    """Extract the first JSON object from a model response."""
+    if not isinstance(text, str):
+        raise ValueError("Model response was not text")
+    start = text.find("{")
+    end = text.rfind("}")
+    if start < 0 or end < 0 or end <= start:
+        raise ValueError("No JSON object found in model response")
+    candidate = text[start : end + 1]
+    return json.loads(candidate)
+
+
+def _validate_generated_problem_payload(payload: dict) -> dict:
+    """Normalize and validate generated-problem payload."""
+    if not isinstance(payload, dict):
+        raise ValueError("Generated problem payload must be an object")
+
+    required_keys = ["problem_title", "prompt", "constraints", "examples", "sample_tests", "hidden_tests"]
+    for k in required_keys:
+        if k not in payload:
+            raise ValueError(f"Generated problem missing field: {k}")
+
+    def ensure_tests(value: Any, name: str) -> list[dict]:
+        if not isinstance(value, list):
+            raise ValueError(f"{name} must be a list")
+        normalized: list[dict] = []
+        for t in value:
+            if not isinstance(t, dict):
+                continue
+            inp = t.get("input")
+            if not isinstance(inp, dict):
+                continue
+            if "expectedOutput" not in t:
+                continue
+            normalized.append({"input": inp, "expectedOutput": t.get("expectedOutput")})
+        if not normalized:
+            raise ValueError(f"{name} had no valid test cases")
+        # Ensure serializable
+        json.dumps(normalized)
+        return normalized
+
+    constraints = payload.get("constraints")
+    if not isinstance(constraints, list):
+        constraints = [str(constraints)] if constraints is not None else []
+
+    examples = payload.get("examples")
+    if not isinstance(examples, list):
+        examples = []
+    else:
+        cleaned_examples = []
+        for ex in examples:
+            if not isinstance(ex, dict):
+                continue
+            inp = ex.get("input")
+            out = ex.get("output")
+            if not isinstance(inp, dict):
+                continue
+            cleaned_examples.append(
+                {
+                    "input": inp,
+                    "output": out,
+                    "explanation": str(ex.get("explanation") or "").strip(),
+                }
+            )
+        examples = cleaned_examples
+
+    sample_tests = ensure_tests(payload.get("sample_tests"), "sample_tests")
+    hidden_tests = ensure_tests(payload.get("hidden_tests"), "hidden_tests")
+
+    # Enforce stable test counts for UI/UX and grading consistency
+    if len(sample_tests) < 3 or len(hidden_tests) < 10:
+        raise ValueError("Generated tests did not meet minimum counts (need 3 sample + 10 hidden).")
+    sample_tests = sample_tests[:3]
+    hidden_tests = hidden_tests[:10]
+
+    # Starter code (optional in model output; we will provide defaults)
+    starter_code_raw = payload.get("starter_code")
+    starter_code: dict[str, str] = {}
+    if isinstance(starter_code_raw, dict):
+        for k, v in starter_code_raw.items():
+            if isinstance(k, str) and isinstance(v, str) and v.strip():
+                starter_code[k.strip().lower()] = v
+
+    # Infer a minimal shape from sample input keys (for nicer templates)
+    input_keys: list[str] = []
+    try:
+        first_inp = sample_tests[0].get("input") if sample_tests else None
+        if isinstance(first_inp, dict):
+            input_keys = list(first_inp.keys())[:8]
+    except Exception:
+        input_keys = []
+
+    if "python" not in starter_code:
+        keys_hint = ", ".join([f"'{k}'" for k in input_keys]) if input_keys else "(see prompt)"
+        starter_code["python"] = (
+            "class Solution:\n"
+            "    def solution(self, input):\n"
+            f"        \"\"\"input is a dict/object with keys: {keys_hint}\"\"\"\n"
+            "        # TODO: implement\n"
+            "        pass\n"
+        )
+    if "javascript" not in starter_code:
+        keys_hint = ", ".join([k for k in input_keys]) if input_keys else "/* see prompt */"
+        starter_code["javascript"] = (
+            "function solution(input) {\n"
+            f"  // input is an object with keys: {keys_hint}\n"
+            "  // TODO: implement\n"
+            "}\n"
+        )
+
+    prompt_text = str(payload.get("prompt") or "").strip()
+    if len(prompt_text) > 4000:
+        prompt_text = prompt_text[:4000].rstrip() + "…"
+
+    normalized_payload = {
+        "problem_title": str(payload.get("problem_title") or "Technical Problem").strip() or "Technical Problem",
+        "prompt": prompt_text,
+        "constraints": [str(c).strip() for c in constraints if str(c).strip()],
+        "examples": examples,
+        "sample_tests": sample_tests,
+        "hidden_tests": hidden_tests,
+        "starter_code": starter_code,
+        "input_notes": str(payload.get("input_notes") or "").strip(),
+        "output_notes": str(payload.get("output_notes") or "").strip(),
+    }
+    if not normalized_payload["prompt"]:
+        raise ValueError("Generated problem prompt was empty")
+
+    return normalized_payload
+
+
+def _generate_problem_fallback(question: dict) -> dict:
+    title = str(question.get("title") or "Technical Problem").strip()
+    return {
+        "problem_title": f"Practice: {title}",
+        "prompt": (
+            "Write a function `solution(input)` that returns the sum of the integers in `input.nums`.\n\n"
+            "Input is a JSON object. Example: `{\"nums\": [1, 2, 3]}`."
+        ),
+        "constraints": ["1 ≤ len(nums) ≤ 10^5", "Each number fits in 32-bit signed integer"],
+        "examples": [
+            {"input": {"nums": [1, 2, 3]}, "output": 6, "explanation": "1+2+3 = 6"},
+        ],
+        "sample_tests": [
+            {"input": {"nums": [1, 2, 3]}, "expectedOutput": 6},
+            {"input": {"nums": [10]}, "expectedOutput": 10},
+            {"input": {"nums": [-1, 1]}, "expectedOutput": 0},
+        ],
+        "hidden_tests": [
+            {"input": {"nums": [0, 0, 0]}, "expectedOutput": 0},
+            {"input": {"nums": [-5, 2, 7]}, "expectedOutput": 4},
+            {"input": {"nums": [100, 200, 300]}, "expectedOutput": 600},
+            {"input": {"nums": [1, -1, 1, -1]}, "expectedOutput": 0},
+            {"input": {"nums": [42]}, "expectedOutput": 42},
+            {"input": {"nums": [2, 2, 2, 2]}, "expectedOutput": 8},
+            {"input": {"nums": [-10, -20]}, "expectedOutput": -30},
+            {"input": {"nums": [3, 1, 4, 1, 5]}, "expectedOutput": 14},
+            {"input": {"nums": [7, 0, -7]}, "expectedOutput": 0},
+            {"input": {"nums": [999999]}, "expectedOutput": 999999},
+        ],
+        "input_notes": "`input` will be a dict/object.",
+        "output_notes": "Return a JSON-serializable value (number, string, array, object).",
+    }
+
+
+def _generate_original_problem_from_metadata(question: dict) -> dict:
+    """Use Gemini to generate an original problem prompt + deterministic tests.
+
+    Important: We do not fetch or reproduce any copyrighted LeetCode statements.
+    """
+    title = str(question.get("title") or "").strip()
+    difficulty = str(question.get("difficulty") or "medium").strip()
+    topics = question.get("topics") or []
+    if not isinstance(topics, list):
+        topics = []
+    topics_str = ", ".join([str(t) for t in topics[:8]])
+
+    prompt = f"""You are creating an ORIGINAL coding interview problem for practice.
+
+Do NOT copy or paraphrase any existing LeetCode problem statement. Do NOT mention LeetCode. The output must be novel.
+
+Use only this metadata as inspiration (title/topics), but create a distinct problem:
+- Title (inspiration only): {title}
+- Difficulty target: {difficulty}
+- Topics (inspiration only): {topics_str}
+
+The candidate will implement `solution(input)` where `input` is a JSON object/dict.
+Return ONLY valid JSON (no markdown) with this schema:
+{{
+  "problem_title": string,
+  "prompt": string,
+  "constraints": string[],
+  "input_notes": string,
+  "output_notes": string,
+    "starter_code": {"python": string, "javascript": string},
+  "examples": [{{"input": object, "output": any, "explanation": string}}],
+  "sample_tests": [{{"input": object, "expectedOutput": any}}],
+  "hidden_tests": [{{"input": object, "expectedOutput": any}}]
+}}
+
+Requirements:
+- Keep the prompt concise but clear (<= 250 words).
+- Provide 2-3 examples.
+- Provide exactly 3 sample_tests and 10 hidden_tests.
+- Ensure tests are consistent with the prompt and fully deterministic.
+- expectedOutput must be JSON-serializable.
+"""
+
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    response = call_gemini_with_retry(
+        client=client,
+        model="gemini-2.5-flash",
+        contents=prompt,
+        max_retries=3,
+        initial_delay=2,
+    )
+
+    payload = _extract_first_json_object(response.text or "")
+    return _validate_generated_problem_payload(payload)
+
+# Cache for SimplifyJobs internship listings (parsed from README.md)
+_simplifyjobs_cache = {
+    "fetched_at": 0.0,
+    "etag": None,
+    "jobs": [],
+    "source": "https://github.com/SimplifyJobs/Summer2026-Internships",
+    # NOTE: This repo's active branch is typically `dev` (not `main`).
+    "readme_raw_url": "https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/README.md",
+}
+
+
+def _strip_markdown(text: str) -> str:
+    if not isinstance(text, str):
+        return ""
+    t = text
+    t = re.sub(r"\*\*([^*]+)\*\*", r"\1", t)
+    t = re.sub(r"__([^_]+)__", r"\1", t)
+    t = re.sub(r"`([^`]+)`", r"\1", t)
+    # Convert markdown links [name](url) -> name
+    t = re.sub(r"\[([^\]]+)\]\(([^\)]+)\)", r"\1", t)
+    # Drop leftover markdown/image html noise
+    t = re.sub(r"<img[^>]*>", "", t, flags=re.IGNORECASE)
+    t = re.sub(r"</?a[^>]*>", "", t, flags=re.IGNORECASE)
+    t = re.sub(r"</?details[^>]*>", " ", t, flags=re.IGNORECASE)
+    t = re.sub(r"</?summary[^>]*>", " ", t, flags=re.IGNORECASE)
+    t = re.sub(r"</?br\s*/?>", ", ", t, flags=re.IGNORECASE)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
+def _extract_first_url(markdown_or_html: str) -> Optional[str]:
+    if not isinstance(markdown_or_html, str):
+        return None
+    # href="..."
+    m = re.search(r"href=\"([^\"]+)\"", markdown_or_html)
+    if m:
+        return m.group(1)
+    # markdown [..](url)
+    m = re.search(r"\[[^\]]*\]\((https?://[^\)]+)\)", markdown_or_html)
+    if m:
+        return m.group(1)
+    # bare url
+    m = re.search(r"(https?://\S+)", markdown_or_html)
+    if m:
+        return m.group(1).rstrip(')')
+    return None
+
+
+def _parse_simplifyjobs_readme_tables(readme: str) -> list[dict]:
+    jobs: list[dict] = []
+    current_section = ""
+    lines = readme.splitlines()
+
+    def parse_html_table(table_html: str, category: str) -> list[dict]:
+        parsed: list[dict] = []
+        last_company_name: Optional[str] = None
+        last_company_url: Optional[str] = None
+        last_company_raw: Optional[str] = None
+
+        # Extract each <tr>...</tr> block
+        for row_html in re.findall(r"<tr>(.*?)</tr>", table_html, flags=re.IGNORECASE | re.DOTALL):
+            # Skip header rows
+            if re.search(r"<th\b", row_html, flags=re.IGNORECASE):
+                continue
+
+            cells = re.findall(r"<td\b[^>]*>(.*?)</td>", row_html, flags=re.IGNORECASE | re.DOTALL)
+            if len(cells) < 4:
+                continue
+
+            company_cell, role_cell, location_cell, app_cell = cells[0], cells[1], cells[2], cells[3]
+            age_cell = cells[4] if len(cells) >= 5 else ""
+
+            company_url = _extract_first_url(company_cell)
+            company_name = _html_to_text(company_cell)
+            company_name = re.sub(r"[🔥🎓🛂🇺🇸]", "", company_name).strip()
+
+            # Rows for the same company often use a "↳" cell.
+            if company_name in {"↳", ""} and last_company_name:
+                company_name = last_company_name
+                company_url = company_url or last_company_url
+                company_raw = last_company_raw or company_cell
+            else:
+                company_raw = company_cell
+                last_company_name = company_name or last_company_name
+                last_company_url = company_url or last_company_url
+                last_company_raw = company_raw
+
+            role_title = _html_to_text(role_cell)
+            location = _html_to_text(location_cell)
+            location = location.replace("</br>", ", ").replace("<br>", ", ")
+            location = re.sub(r"\s*,\s*", ", ", location)
+            location = re.sub(r"\s+", " ", location).strip(" ,")
+            apply_url = _extract_first_url(app_cell)
+
+            parsed.append({
+                "source": "simplifyjobs_summer2026",
+                "category": category or "",
+                "company": company_name,
+                "company_url": company_url,
+                "role": role_title,
+                "location": location,
+                "apply_url": apply_url,
+                "age": _html_to_text(age_cell),
+                # Provide all description fields we have from the repo row
+                "raw": {
+                    "company_cell": company_raw,
+                    "role_cell": role_cell,
+                    "location_cell": location_cell,
+                    "application_cell": app_cell,
+                    "age_cell": age_cell,
+                    "row": "<tr>" + row_html.strip() + "</tr>",
+                },
+            })
+
+        return parsed
+
+    def normalize_company(company_cell: str) -> tuple[str, Optional[str], str]:
+        raw = company_cell
+        url = _extract_first_url(company_cell)
+        name = _strip_markdown(company_cell)
+        # Remove common legend emoji that are not part of the company name
+        name = re.sub(r"[🔥🎓🛂🇺🇸]", "", name).strip()
+        return name, url, raw
+
+    def normalize_location(location_cell: str) -> str:
+        t = _strip_markdown(location_cell)
+        t = t.replace("</br>", ", ").replace("<br>", ", ")
+        t = re.sub(r"\s*,\s*", ", ", t)
+        t = re.sub(r"\s+", " ", t).strip(" ,")
+        return t
+
+    in_table = False
+    in_html_table = False
+    html_table_buf: list[str] = []
+    for line in lines:
+        # Track sections so we can include category context
+        if line.startswith("## "):
+            current_section = line.replace("##", "").strip()
+
+        # HTML tables are used in the current SimplifyJobs README.
+        if "<table" in line.lower():
+            in_html_table = True
+            html_table_buf = [line]
+            continue
+
+        if in_html_table:
+            html_table_buf.append(line)
+            if "</table>" in line.lower():
+                table_html = "\n".join(html_table_buf)
+                jobs.extend(parse_html_table(table_html, current_section))
+                in_html_table = False
+                html_table_buf = []
+            continue
+
+        # Detect table header
+        if re.match(r"^\|\s*Company\s*\|\s*Role\s*\|\s*Location\s*\|", line):
+            in_table = True
+            continue
+        # Separator row
+        if in_table and re.match(r"^\|\s*-+\s*\|", line):
+            continue
+
+        if in_table:
+            if not line.startswith("|"):
+                in_table = False
+                continue
+
+            parts = [p.strip() for p in line.strip().strip("|").split("|")]
+            if len(parts) < 4:
+                continue
+            company_cell, role_cell, location_cell, app_cell = parts[0], parts[1], parts[2], parts[3]
+            age_cell = parts[4] if len(parts) >= 5 else ""
+
+            company_name, company_url, company_raw = normalize_company(company_cell)
+            role_title = _strip_markdown(role_cell)
+            location = normalize_location(location_cell)
+            apply_url = _extract_first_url(app_cell)
+
+            jobs.append({
+                "source": "simplifyjobs_summer2026",
+                "category": current_section or "",
+                "company": company_name,
+                "company_url": company_url,
+                "role": role_title,
+                "location": location,
+                "apply_url": apply_url,
+                "age": _strip_markdown(age_cell),
+                # Provide all description fields we have from the repo row
+                "raw": {
+                    "company_cell": company_raw,
+                    "role_cell": role_cell,
+                    "location_cell": location_cell,
+                    "application_cell": app_cell,
+                    "age_cell": age_cell,
+                    "row": line.strip(),
+                },
+            })
+
+    # Deduplicate by (company, role, location, apply_url)
+    seen = set()
+    deduped: list[dict] = []
+    for j in jobs:
+        key = (j.get("company"), j.get("role"), j.get("location"), j.get("apply_url"))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(j)
+    return deduped
+
+
+def _get_simplifyjobs_listings_cached(max_age_seconds: int = 60 * 60) -> list[dict]:
+    now = time.time()
+    if _simplifyjobs_cache["jobs"] and (now - float(_simplifyjobs_cache["fetched_at"])) < max_age_seconds:
+        return _simplifyjobs_cache["jobs"]
+
+    # Repo sometimes changes default branch; try a few known candidates.
+    candidates = [
+        _simplifyjobs_cache.get("readme_raw_url") or "",
+        "https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/README.md",
+        "https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/main/README.md",
+        "https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/master/README.md",
+    ]
+    seen_urls: set[str] = set()
+    urls: list[str] = []
+    for u in candidates:
+        u = (u or "").strip()
+        if not u or u in seen_urls:
+            continue
+        seen_urls.add(u)
+        urls.append(u)
+
+    last_error: Optional[Exception] = None
+    for url in urls:
+        headers = {}
+        # Only send If-None-Match for the current configured URL.
+        if url == _simplifyjobs_cache.get("readme_raw_url") and _simplifyjobs_cache.get("etag"):
+            headers["If-None-Match"] = _simplifyjobs_cache["etag"]
+
+        try:
+            resp = requests.get(url, headers=headers, timeout=15)
+            if resp.status_code == 304 and _simplifyjobs_cache["jobs"]:
+                _simplifyjobs_cache["fetched_at"] = now
+                return _simplifyjobs_cache["jobs"]
+
+            resp.raise_for_status()
+            readme = resp.text
+            jobs = _parse_simplifyjobs_readme_tables(readme)
+            _simplifyjobs_cache["jobs"] = jobs
+            _simplifyjobs_cache["fetched_at"] = now
+            _simplifyjobs_cache["etag"] = resp.headers.get("ETag")
+            # Remember which URL worked for next time.
+            if url != _simplifyjobs_cache.get("readme_raw_url"):
+                _simplifyjobs_cache["readme_raw_url"] = url
+                _simplifyjobs_cache["etag"] = resp.headers.get("ETag")
+            return jobs
+        except Exception as e:
+            last_error = e
+            continue
+
+    # If fetch fails, fall back to stale cache if present
+    if _simplifyjobs_cache["jobs"]:
+        return _simplifyjobs_cache["jobs"]
+    raise last_error or RuntimeError("Failed to fetch SimplifyJobs README")
+
+
+def _html_to_text(html: str) -> str:
+    if not isinstance(html, str):
+        return ""
+    t = re.sub(r"<script[\s\S]*?</script>", " ", html, flags=re.IGNORECASE)
+    t = re.sub(r"<style[\s\S]*?</style>", " ", t, flags=re.IGNORECASE)
+    t = re.sub(r"<[^>]+>", " ", t)
+    t = t.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
+def _extract_json_ld_job_posting_text(html: str) -> Optional[str]:
+    """Extract job posting text from JSON-LD blocks if present.
+
+    Many ATS providers (notably Workday) embed the full job description in
+    <script type="application/ld+json"> blocks.
+    """
+    if not isinstance(html, str) or not html:
+        return None
+
+    blocks = re.findall(
+        r"<script[^>]+type=[\"']application/ld\+json[\"'][^>]*>([\s\S]*?)</script>",
+        html,
+        flags=re.IGNORECASE,
+    )
+    if not blocks:
+        return None
+
+    def _as_list(x):
+        if isinstance(x, list):
+            return x
+        if isinstance(x, dict):
+            return [x]
+        return []
+
+    candidates: list[dict] = []
+    for raw in blocks:
+        raw = (raw or "").strip()
+        if not raw:
+            continue
+        try:
+            obj = json.loads(raw)
+        except Exception:
+            continue
+
+        for item in _as_list(obj):
+            if not isinstance(item, dict):
+                continue
+            t = item.get("@type")
+            # Some providers use a list for @type
+            types = [str(x).lower() for x in (t if isinstance(t, list) else [t]) if x]
+            if any("jobposting" in tt for tt in types) or ("description" in item and "hiringOrganization" in item):
+                candidates.append(item)
+
+    if not candidates:
+        return None
+
+    job = candidates[0]
+    title = (job.get("title") or job.get("name") or "").strip()
+    org = job.get("hiringOrganization") or {}
+    org_name = (org.get("name") if isinstance(org, dict) else "") or ""
+    desc = job.get("description") or ""
+    desc_txt = _html_to_text(desc) if isinstance(desc, str) else ""
+
+    # Workday sometimes includes qualifications/responsibilities in the description only.
+    parts = []
+    header_bits = [b for b in [title, org_name] if isinstance(b, str) and b.strip()]
+    if header_bits:
+        parts.append(" - ".join([b.strip() for b in header_bits]))
+    if desc_txt:
+        parts.append(desc_txt)
+
+    out = "\n".join(parts).strip()
+    return out or None
+
+
+_job_posting_cache: dict[str, dict] = {}
+_job_posting_details_cache: dict[str, dict] = {}
+
+
+def _fetch_job_posting_text(url: str, max_chars: int = 8000) -> Optional[str]:
+    if not url or not isinstance(url, str):
+        return None
+    u = url.strip()
+    if not (u.startswith("http://") or u.startswith("https://")):
+        return None
+
+    now = time.time()
+    cached = _job_posting_cache.get(u)
+    if cached and (now - float(cached.get("fetched_at", 0))) < 60 * 60 * 6:
+        return cached.get("text")
+
+    try:
+        resp = requests.get(
+            u,
+            timeout=12,
+            headers={
+                "User-Agent": "Mozilla/5.0 (compatible; frymyresume/1.0; +https://frymyresume.cv)",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+        )
+        if resp.status_code >= 400:
+            return None
+        # Prefer JSON-LD extraction (common on ATS pages) to avoid losing content to script stripping.
+        txt = _extract_json_ld_job_posting_text(resp.text)
+        if not txt:
+            txt = _html_to_text(resp.text)
+        if not txt:
+            return None
+        txt = txt[:max_chars]
+        _job_posting_cache[u] = {"fetched_at": now, "text": txt}
+        return txt
+    except Exception:
+        return None
+
+
+def _summarize_job_posting_to_requirements(
+    *,
+    posting_text: str,
+    company: Optional[str] = None,
+    role: Optional[str] = None,
+) -> Optional[dict]:
+    """Return a structured summary of a job posting.
+
+    If Gemini is available, paraphrase (avoid verbatim copying) into responsibilities/requirements.
+    Otherwise return a small heuristic summary.
+    """
+    t = (posting_text or "").strip()
+    if not t:
+        return None
+
+    def _heuristic() -> dict:
+        return {
+            "summary": (t[:600] + ("…" if len(t) > 600 else "")),
+            "responsibilities": [],
+            "requirements": [],
+            "qualifications": [],
+            "nice_to_have": [],
+        }
+
+    # Fallback: heuristic-only when no API key.
+    if not GEMINI_API_KEY:
+        return _heuristic()
+
+    try:
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        prompt = f"""You are extracting job details for a job simulator.
+
+Return ONLY valid JSON with these keys:
+- summary: string (<= 600 chars)
+- responsibilities: array of strings (<= 10 items)
+- requirements: array of strings (<= 12 items)
+- qualifications: array of strings (<= 8 items)
+- nice_to_have: array of strings (<= 8 items)
+
+Rules:
+- Paraphrase. Do NOT copy sentences verbatim from the posting.
+- Avoid quoting more than 6 consecutive words from the source.
+- If a section isn't present, return an empty array.
+
+Company: {company or ''}
+Role: {role or ''}
+
+JOB POSTING TEXT:
+{t}
+"""
+
+        resp = call_gemini_with_retry(
+            client=client,
+            model="gemini-2.5-flash",
+            contents=prompt,
+            max_retries=2,
+            initial_delay=1,
+        )
+        m = re.search(r"\{.*\}", (resp.text or "").strip(), flags=re.DOTALL)
+        if not m:
+            return _heuristic()
+        obj = json.loads(m.group(0))
+        if not isinstance(obj, dict):
+            return _heuristic()
+
+        def _clamp_list(x, n):
+            if not isinstance(x, list):
+                return []
+            out = []
+            for item in x:
+                if not isinstance(item, str):
+                    continue
+                s = item.strip()
+                if s:
+                    out.append(s)
+                if len(out) >= n:
+                    break
+            return out
+
+        summary = obj.get("summary")
+        if not isinstance(summary, str):
+            summary = ""
+        summary = summary.strip()
+        if len(summary) > 600:
+            summary = summary[:600].rstrip() + "…"
+
+        return {
+            "summary": summary,
+            "responsibilities": _clamp_list(obj.get("responsibilities"), 10),
+            "requirements": _clamp_list(obj.get("requirements"), 12),
+            "qualifications": _clamp_list(obj.get("qualifications"), 8),
+            "nice_to_have": _clamp_list(obj.get("nice_to_have"), 8),
+        }
+    except Exception:
+        return _heuristic()
+
+
+@app.get("/api/jobs/real")
+async def list_real_jobs(q: str = "", limit: int = 100, offset: int = 0):
+    """Return internship rows from SimplifyJobs/Summer2026-Internships README.md.
+
+    Notes:
+    - This endpoint returns the fields available in the repo table (not scraped full job postings).
+    - Use `q` to filter by company/role/location/category.
+    """
+    limit = max(1, min(int(limit), 250))
+    offset = max(0, int(offset))
+
+    try:
+        jobs = _get_simplifyjobs_listings_cached()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch SimplifyJobs listings: {e}")
+    if q:
+        qn = q.strip().lower()
+        jobs = [
+            j for j in jobs
+            if qn in (j.get("company") or "").lower()
+            or qn in (j.get("role") or "").lower()
+            or qn in (j.get("location") or "").lower()
+            or qn in (j.get("category") or "").lower()
+        ]
+
+    total = len(jobs)
+    page = jobs[offset:offset + limit]
+    return JSONResponse(content={
+        "success": True,
+        "source": _simplifyjobs_cache["source"],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "jobs": page,
+    })
+
+
+@app.get("/api/jobs/real/details")
+async def get_real_job_details(
+    apply_url: str,
+    company: str = "",
+    role: str = "",
+):
+    """Fetch and summarize a single real job posting.
+
+    The SimplifyJobs list doesn't include full descriptions. This endpoint uses the `apply_url`
+    to fetch the posting page and returns a paraphrased summary + requirements.
+    """
+    u = (apply_url or "").strip()
+    if not u:
+        raise HTTPException(status_code=400, detail="apply_url is required")
+
+    now = time.time()
+    cached = _job_posting_details_cache.get(u)
+    if cached and (now - float(cached.get("fetched_at", 0))) < 60 * 60 * 6:
+        return JSONResponse(content={
+            "success": True,
+            "apply_url": u,
+            "details": cached.get("details"),
+            "cached": True,
+        })
+
+    posting_text = _fetch_job_posting_text(u, max_chars=12000)
+    if not posting_text:
+        return JSONResponse(content={
+            "success": False,
+            "apply_url": u,
+            "error": "Could not fetch job posting text from apply_url",
+        })
+
+    details = _summarize_job_posting_to_requirements(
+        posting_text=posting_text,
+        company=(company or None),
+        role=(role or None),
+    )
+    if not details:
+        details = {
+            "summary": (posting_text[:600] + ("…" if len(posting_text) > 600 else "")),
+            "responsibilities": [],
+            "requirements": [],
+            "qualifications": [],
+            "nice_to_have": [],
+        }
+
+    _job_posting_details_cache[u] = {"fetched_at": now, "details": details}
+    return JSONResponse(content={
+        "success": True,
+        "apply_url": u,
+        "details": details,
+        "cached": False,
+    })
 
 
 def extract_text_from_pdf(pdf_file: bytes) -> str:
@@ -295,9 +1121,16 @@ async def analyze_resume(
 @app.post("/api/screen-resume")
 async def screen_resume(
     file: UploadFile = File(...),
-    difficulty: str = Form(...),
+    difficulty: str = Form("easy"),
     role: str = Form(...),
-    level: str = Form(...)
+    level: str = Form(...),
+    company: Optional[str] = Form(None),
+    job_source: Optional[str] = Form(None),
+    job_category: Optional[str] = Form(None),
+    job_location: Optional[str] = Form(None),
+    job_apply_url: Optional[str] = Form(None),
+    job_age: Optional[str] = Form(None),
+    job_row: Optional[str] = Form(None),
 ):
     """
     Screen resume for job application simulator.
@@ -322,6 +1155,53 @@ async def screen_resume(
                 status_code=400,
                 detail="File does not have any content"
             )
+
+        # If the caller provided a real job listing, infer difficulty using AI.
+        inferred_difficulty: Optional[str] = None
+        if (job_source or "").lower() in {"real", "simplifyjobs_summer2026", "simplifyjobs"}:
+            try:
+                client = genai.Client(api_key=GEMINI_API_KEY)
+                listing_blob = "\n".join([
+                    f"Company: {company or ''}",
+                    f"Role: {role}",
+                    f"Category: {job_category or ''}",
+                    f"Location: {job_location or ''}",
+                    f"Apply URL: {job_apply_url or ''}",
+                    f"Age: {job_age or ''}",
+                    f"Repo row: {job_row or ''}",
+                ])
+                difficulty_prompt = f"""Choose the internship screening difficulty for this job.
+
+Return ONLY valid JSON like {{"difficulty":"easy"}}.
+Allowed values: easy, medium, hard.
+
+Heuristics:
+- hard: Big Tech/top finance/very selective OR highly specialized role.
+- medium: typical established company internship.
+- easy: early-stage/less selective/general entry internship.
+
+LISTING:
+{listing_blob}
+"""
+                resp = call_gemini_with_retry(
+                    client=client,
+                    model="gemini-2.5-flash",
+                    contents=difficulty_prompt,
+                    max_retries=2,
+                    initial_delay=1,
+                )
+                m = re.search(r"\{.*\}", (resp.text or ""), flags=re.DOTALL)
+                if m:
+                    obj = json.loads(m.group(0))
+                    d = (obj.get("difficulty") or "").strip().lower()
+                    if d in {"easy", "medium", "hard"}:
+                        inferred_difficulty = d
+            except Exception:
+                inferred_difficulty = None
+
+        effective_difficulty = (inferred_difficulty or difficulty or "easy").strip().lower()
+        if effective_difficulty not in {"easy", "medium", "hard"}:
+            effective_difficulty = "easy"
 
         # Map difficulty to company tier and screening criteria
         difficulty_configs = {
@@ -392,7 +1272,7 @@ async def screen_resume(
             }
         }
 
-        config = difficulty_configs.get(difficulty, difficulty_configs["easy"])
+        config = difficulty_configs.get(effective_difficulty, difficulty_configs["easy"])
         level_context = f"{level} level" if level != "internship" else "internship position"
 
         # Reference resume examples for calibration
@@ -427,11 +1307,34 @@ async def screen_resume(
             """
         }
 
+        job_context = ""
+        if (job_source or "").lower() in {"real", "simplifyjobs_summer2026", "simplifyjobs"}:
+            job_posting_text = None
+            if job_apply_url:
+                # Best-effort: some postings (especially simplify.jobs) are publicly readable.
+                job_posting_text = _fetch_job_posting_text(job_apply_url)
+
+            job_context = f"""
+    JOB LISTING CONTEXT (from SimplifyJobs/Summer2026-Internships list; may be limited):
+    - Company: {company or 'Unknown'}
+    - Role: {role}
+    - Category: {job_category or ''}
+    - Location: {job_location or ''}
+    - Apply URL: {job_apply_url or ''}
+    - Age: {job_age or ''}
+    - Source Row: {job_row or ''}
+ 
+JOB POSTING TEXT (best-effort fetch; use this to judge requirements if present):
+{(job_posting_text or '')}
+    """.strip()
+
         prompt = f"""You are a resume screener at {config['company_type']} for a {role} position ({level_context}).
+
+        {job_context}
 
         {config['strictness']}
 
-        {reference_examples.get(difficulty, reference_examples["easy"])}
+        {reference_examples.get(effective_difficulty, reference_examples["easy"])}
 
         RESUME TO REVIEW:
         {text_content}
@@ -441,6 +1344,7 @@ async def screen_resume(
         2. The reference resume represents the MINIMUM bar for passing
         3. If this resume is EQUAL TO or BETTER THAN the reference, you should PASS them
         4. If this resume is WEAKER than the reference, you should REJECT them
+        4b. If JOB POSTING TEXT includes explicit requirements and the resume clearly misses critical requirements, REJECT.
         5. Make a BINARY decision: PASS or REJECT
         6. Provide brief reasoning
 
@@ -482,7 +1386,8 @@ async def screen_resume(
         return JSONResponse(content={
             "passed": passed,
             "feedback": response_text,
-            "difficulty": difficulty,
+            "difficulty": effective_difficulty,
+            "difficulty_inferred": bool(inferred_difficulty),
             "role": role,
             "level": level
         })
@@ -502,31 +1407,82 @@ TECHNICAL_QUESTIONS = {
         {
             "id": "two-sum",
             "title": "Two Sum",
-            "description": "Given an array of integers nums and an integer target, return indices of the two numbers such that they add up to target.",
+            "description": "Given an array of integers nums and an integer target, return the indices i and j such that nums[i] + nums[j] == target and i != j. You may assume that every input has exactly one pair of indices that satisfy the condition. Return the answer with the smaller index first.",
             "difficulty": "Easy",
             "examples": [
-                {"input": "nums = [2,7,11,15], target = 9", "output": "[0,1]", "explanation": "Because nums[0] + nums[1] == 9, we return [0, 1]."}
+                {"input": "nums = [3,4,5,6], target = 7", "output": "[0,1]", "explanation": "nums[0] + nums[1] == 7, so we return [0, 1]."},
+                {"input": "nums = [4,5,6], target = 10", "output": "[0,2]"}
             ],
             "constraints": [
-                "2 <= nums.length <= 10^4",
-                "-10^9 <= nums[i] <= 10^9",
-                "-10^9 <= target <= 10^9"
+                "2 <= nums.length <= 1000",
+                "-10,000,000 <= nums[i] <= 10,000,000",
+                "-10,000,000 <= target <= 10,000,000",
+                "Only one valid answer exists"
             ],
             "sampleTestCases": [
-                {"input": {"nums": [2,7,11,15], "target": 9}, "expectedOutput": [0,1]},
-                {"input": {"nums": [3,2,4], "target": 6}, "expectedOutput": [1,2]},
-                {"input": {"nums": [3,3], "target": 6}, "expectedOutput": [0,1]}
+                {"input": {"nums": [3, 4, 5, 6], "target": 7}, "expectedOutput": [0, 1]},
+                {"input": {"nums": [4, 5, 6], "target": 10}, "expectedOutput": [0, 2]},
+                {"input": {"nums": [5, 5], "target": 10}, "expectedOutput": [0, 1]}
             ],
             "hiddenTestCases": [
-                {"input": {"nums": [1, 5, 3, 7, 9], "target": 10}, "expectedOutput": [2,3]},
-                {"input": {"nums": [0, 4, 3, 0], "target": 0}, "expectedOutput": [0,3]},
-                {"input": {"nums": [-1, -2, -3, -4, -5], "target": -8}, "expectedOutput": [2,4]},
-                {"input": {"nums": [1, 2], "target": 3}, "expectedOutput": [0,1]},
-                {"input": {"nums": [5, 75, 25], "target": 100}, "expectedOutput": [1,2]},
-                {"input": {"nums": [1, 3, 4, 2], "target": 6}, "expectedOutput": [2,3]},
-                {"input": {"nums": [10, 20, 30, 40, 50], "target": 90}, "expectedOutput": [3,4]},
-                {"input": {"nums": [-3, 4, 3, 90], "target": 0}, "expectedOutput": [0,2]},
-                {"input": {"nums": [1, 1, 1, 1, 1, 4, 1, 1, 1, 1, 1, 7, 1, 1, 1, 1, 1], "target": 11}, "expectedOutput": [5,11]}
+                {"input": {"nums": [2, 7, 11, 15], "target": 9}, "expectedOutput": [0, 1]},
+                {"input": {"nums": [-1, -2, -3, -4, -5], "target": -8}, "expectedOutput": [2, 4]},
+                {"input": {"nums": [0, 4, 3, 0], "target": 0}, "expectedOutput": [0, 3]},
+                {"input": {"nums": [1, 2], "target": 3}, "expectedOutput": [0, 1]},
+                {"input": {"nums": [10, 20, 30, 40, 50], "target": 90}, "expectedOutput": [3, 4]},
+                {"input": {"nums": [1, 3, 4, 2], "target": 6}, "expectedOutput": [2, 3]}
+            ]
+        },
+        {
+            "id": "contains-duplicate",
+            "title": "Contains Duplicate",
+            "description": "Given an integer array nums, return true if any value appears more than once in the array, otherwise return false.",
+            "difficulty": "Easy",
+            "examples": [
+                {"input": "nums = [1, 2, 3, 3]", "output": "true"},
+                {"input": "nums = [1, 2, 3, 4]", "output": "false"}
+            ],
+            "constraints": [
+                "1 <= nums.length <= 10^5",
+                "-10^9 <= nums[i] <= 10^9"
+            ],
+            "sampleTestCases": [
+                {"input": {"nums": [1, 2, 3, 3]}, "expectedOutput": True},
+                {"input": {"nums": [1, 2, 3, 4]}, "expectedOutput": False}
+            ],
+            "hiddenTestCases": [
+                {"input": {"nums": []}, "expectedOutput": False},
+                {"input": {"nums": [1]}, "expectedOutput": False},
+                {"input": {"nums": [0, 0]}, "expectedOutput": True},
+                {"input": {"nums": [-1, -2, -3, -4]}, "expectedOutput": False},
+                {"input": {"nums": [-1, -2, -3, -1]}, "expectedOutput": True},
+                {"input": {"nums": [1000000000, -1000000000, 1000000000]}, "expectedOutput": True},
+                {"input": {"nums": [5, 4, 3, 2, 1]}, "expectedOutput": False}
+            ]
+        },
+        {
+            "id": "valid-anagram",
+            "title": "Valid Anagram",
+            "description": "Given two strings s and t, return true if the two strings are anagrams of each other, otherwise return false. An anagram contains the exact same characters as another string, but the order can be different.",
+            "difficulty": "Easy",
+            "examples": [
+                {"input": "s = \"racecar\", t = \"carrace\"", "output": "true"},
+                {"input": "s = \"jar\", t = \"jam\"", "output": "false"}
+            ],
+            "constraints": [
+                "s and t consist of lowercase English letters"
+            ],
+            "sampleTestCases": [
+                {"input": {"s": "racecar", "t": "carrace"}, "expectedOutput": True},
+                {"input": {"s": "jar", "t": "jam"}, "expectedOutput": False}
+            ],
+            "hiddenTestCases": [
+                {"input": {"s": "a", "t": "a"}, "expectedOutput": True},
+                {"input": {"s": "a", "t": "b"}, "expectedOutput": False},
+                {"input": {"s": "ab", "t": "ba"}, "expectedOutput": True},
+                {"input": {"s": "abc", "t": "ab"}, "expectedOutput": False},
+                {"input": {"s": "aaaaaaaaaa", "t": "aaaaaaaaaa"}, "expectedOutput": True},
+                {"input": {"s": "anagram", "t": "nagaram"}, "expectedOutput": True}
             ]
         },
         {
@@ -553,37 +1509,312 @@ TECHNICAL_QUESTIONS = {
                 {"input": {"s": ["!","@","#","$","%"]}, "expectedOutput": ["%","$","#","@","!"]},
                 {"input": {"s": ["r","a","c","e","c","a","r"]}, "expectedOutput": ["r","a","c","e","c","a","r"]}
             ]
-        }
-    ],
-    "medium": [
+        },
+        {
+            "id": "valid-palindrome",
+            "title": "Valid Palindrome",
+            "description": "Given a string s, return true if it is a palindrome, otherwise return false. A palindrome reads the same forward and backward. It is case-insensitive and ignores all non-alphanumeric characters.",
+            "difficulty": "Easy",
+            "examples": [
+                {
+                    "input": "s = \"Was it a car or a cat I saw?\"",
+                    "output": "true",
+                    "explanation": "After filtering we get \"wasitacaroracatisaw\", which is a palindrome."
+                },
+                {"input": "s = \"tab a cat\"", "output": "false", "explanation": "\"tabacat\" is not a palindrome."}
+            ],
+            "constraints": [
+                "1 <= s.length <= 1000",
+                "s is made up of only printable ASCII characters"
+            ],
+            "sampleTestCases": [
+                {"input": {"s": "Was it a car or a cat I saw?"}, "expectedOutput": True},
+                {"input": {"s": "tab a cat"}, "expectedOutput": False}
+            ],
+            "hiddenTestCases": [
+                {"input": {"s": "A man, a plan, a canal: Panama"}, "expectedOutput": True},
+                {"input": {"s": "race a car"}, "expectedOutput": False},
+                {"input": {"s": "0P"}, "expectedOutput": False},
+                {"input": {"s": "   "}, "expectedOutput": True}
+            ]
+        },
+        {
+            "id": "best-time-stock",
+            "title": "Best Time to Buy and Sell Stock",
+            "description": "You are given an integer array prices where prices[i] is the price of NeetCoin on the ith day. Choose one day to buy and a later day to sell. Return the maximum profit. If no profit is possible, return 0.",
+            "difficulty": "Easy",
+            "examples": [
+                {
+                    "input": "prices = [10,1,5,6,7,1]",
+                    "output": "6",
+                    "explanation": "Buy on day 2 (price 1) and sell on day 5 (price 7)."
+                },
+                {"input": "prices = [10,8,7,5,2]", "output": "0"}
+            ],
+            "constraints": [
+                "1 <= prices.length <= 100",
+                "0 <= prices[i] <= 100"
+            ],
+            "sampleTestCases": [
+                {"input": {"prices": [10, 1, 5, 6, 7, 1]}, "expectedOutput": 6},
+                {"input": {"prices": [10, 8, 7, 5, 2]}, "expectedOutput": 0}
+            ],
+            "hiddenTestCases": [
+                {"input": {"prices": [1, 2]}, "expectedOutput": 1},
+                {"input": {"prices": [3, 3, 3]}, "expectedOutput": 0},
+                {"input": {"prices": [2, 1, 2, 1, 0, 1, 2]}, "expectedOutput": 2},
+                {"input": {"prices": [1]}, "expectedOutput": 0}
+            ]
+        },
         {
             "id": "valid-parentheses",
             "title": "Valid Parentheses",
-            "description": "Given a string s containing just the characters '(', ')', '{', '}', '[' and ']', determine if the input string is valid.",
-            "difficulty": "Medium",
+            "description": "You are given a string s consisting of the following characters: '(', ')', '{', '}', '[' and ']'. Return true if the input string is valid, and false otherwise.",
+            "difficulty": "Easy",
             "examples": [
-                {"input": "s = \"()\"", "output": "true"},
-                {"input": "s = \"()[]{}\"", "output": "true"},
-                {"input": "s = \"(]\"", "output": "false"}
+                {"input": "s = \"[]\"", "output": "true"},
+                {"input": "s = \"([{}])\"", "output": "true"},
+                {"input": "s = \"[(])\"", "output": "false"}
             ],
             "constraints": [
-                "1 <= s.length <= 10^4",
-                "s consists of parentheses only '()[]{}'"
+                "1 <= s.length <= 1000"
             ],
             "sampleTestCases": [
-                {"input": {"s": "()"}, "expectedOutput": True},
-                {"input": {"s": "()[]{}"}, "expectedOutput": True},
-                {"input": {"s": "(]"}, "expectedOutput": False}
+                {"input": {"s": "[]"}, "expectedOutput": True},
+                {"input": {"s": "([{}])"}, "expectedOutput": True},
+                {"input": {"s": "[(])"}, "expectedOutput": False}
             ],
             "hiddenTestCases": [
                 {"input": {"s": "{[]}"}, "expectedOutput": True},
                 {"input": {"s": "([)]"}, "expectedOutput": False},
                 {"input": {"s": "((()))"}, "expectedOutput": True},
                 {"input": {"s": "())"}, "expectedOutput": False},
-                {"input": {"s": "((("}, "expectedOutput": False},
-                {"input": {"s": "{[()()]}"}, "expectedOutput": True},
-                {"input": {"s": "()[]{}"}, "expectedOutput": True},
-                {"input": {"s": "(([]){}"}, "expectedOutput": False}
+                {"input": {"s": "((("}, "expectedOutput": False}
+            ]
+        },
+        {
+            "id": "reverse-linked-list",
+            "title": "Reverse Linked List",
+            "description": "Given the beginning of a singly linked list head, reverse the list, and return the new beginning of the list.",
+            "difficulty": "Easy",
+            "examples": [
+                {"input": "head = [0,1,2,3]", "output": "[3,2,1,0]"},
+                {"input": "head = []", "output": "[]"}
+            ],
+            "constraints": [
+                "0 <= The length of the list <= 1000",
+                "-1000 <= Node.val <= 1000"
+            ],
+            "sampleTestCases": [
+                {"input": {"head": [0, 1, 2, 3]}, "expectedOutput": [3, 2, 1, 0]},
+                {"input": {"head": []}, "expectedOutput": []}
+            ],
+            "hiddenTestCases": [
+                {"input": {"head": [1]}, "expectedOutput": [1]},
+                {"input": {"head": [1, 2]}, "expectedOutput": [2, 1]}
+            ]
+        },
+        {
+            "id": "linked-list-cycle",
+            "title": "Linked List Cycle Detection",
+            "description": "Given the beginning of a linked list head, return true if there is a cycle in the linked list. Internally, an index determines where the tail connects; the index is not provided to your function.",
+            "difficulty": "Easy",
+            "examples": [
+                {"input": "head = [1,2,3,4], index = 1", "output": "true"},
+                {"input": "head = [1,2], index = -1", "output": "false"}
+            ],
+            "constraints": [
+                "1 <= Length of the list <= 1000",
+                "-1000 <= Node.val <= 1000"
+            ],
+            "sampleTestCases": [
+                {"input": {"head": [1, 2, 3, 4], "pos": 1}, "expectedOutput": True},
+                {"input": {"head": [1, 2], "pos": -1}, "expectedOutput": False}
+            ],
+            "hiddenTestCases": [
+                {"input": {"head": [1], "pos": -1}, "expectedOutput": False},
+                {"input": {"head": [1], "pos": 0}, "expectedOutput": True},
+                {"input": {"head": [1, 2, 3], "pos": 2}, "expectedOutput": True}
+            ]
+        }
+    ],
+    "medium": [
+        {
+            "id": "longest-consecutive",
+            "title": "Longest Consecutive Sequence",
+            "description": "Given an array of integers nums, return the length of the longest consecutive sequence of elements that can be formed. A consecutive sequence is a sequence where each element is exactly 1 greater than the previous element. You must write an algorithm that runs in O(n) time.",
+            "difficulty": "Medium",
+            "examples": [
+                {"input": "nums = [2,20,4,10,3,4,5]", "output": "4", "explanation": "The longest consecutive sequence is [2,3,4,5]."},
+                {"input": "nums = [0,3,2,5,4,6,1,1]", "output": "7"}
+            ],
+            "constraints": [
+                "0 <= nums.length <= 1000",
+                "-10^9 <= nums[i] <= 10^9"
+            ],
+            "sampleTestCases": [
+                {"input": {"nums": [2, 20, 4, 10, 3, 4, 5]}, "expectedOutput": 4},
+                {"input": {"nums": [0, 3, 2, 5, 4, 6, 1, 1]}, "expectedOutput": 7}
+            ],
+            "hiddenTestCases": [
+                {"input": {"nums": []}, "expectedOutput": 0},
+                {"input": {"nums": [100]}, "expectedOutput": 1},
+                {"input": {"nums": [1, 2, 0, 1]}, "expectedOutput": 3},
+                {"input": {"nums": [-1, -2, -3, 7, 8]}, "expectedOutput": 3}
+            ]
+        },
+        {
+            "id": "three-sum",
+            "title": "3Sum",
+            "description": "Given an integer array nums, return all the triplets [nums[i], nums[j], nums[k]] where nums[i] + nums[j] + nums[k] == 0, and the indices i, j and k are all distinct. The output should not contain any duplicate triplets.",
+            "difficulty": "Medium",
+            "examples": [
+                {"input": "nums = [-1,0,1,2,-1,-4]", "output": "[[-1,-1,2],[-1,0,1]]"},
+                {"input": "nums = [0,1,1]", "output": "[]"},
+                {"input": "nums = [0,0,0]", "output": "[[0,0,0]]"}
+            ],
+            "constraints": [
+                "3 <= nums.length <= 1000",
+                "-10^5 <= nums[i] <= 10^5"
+            ],
+            "sampleTestCases": [
+                {"input": {"nums": [-1, 0, 1, 2, -1, -4]}, "expectedOutput": [[-1, -1, 2], [-1, 0, 1]]},
+                {"input": {"nums": [0, 1, 1]}, "expectedOutput": []},
+                {"input": {"nums": [0, 0, 0]}, "expectedOutput": [[0, 0, 0]]}
+            ],
+            "hiddenTestCases": [
+                {"input": {"nums": [-2, 0, 0, 2, 2]}, "expectedOutput": [[-2, 0, 2]]},
+                {"input": {"nums": [3, -2, 1, 0]}, "expectedOutput": []},
+                {"input": {"nums": [-4, -2, -2, -2, 0, 1, 2, 2, 2, 4]}, "expectedOutput": [[-4, 0, 4], [-4, 2, 2], [-2, -2, 4], [-2, 0, 2]]}
+            ]
+        },
+        {
+            "id": "container-with-most-water",
+            "title": "Container With Most Water",
+            "description": "You are given an integer array heights where heights[i] represents the height of the ith bar. You may choose any two bars to form a container. Return the maximum amount of water a container can store.",
+            "difficulty": "Medium",
+            "examples": [
+                {"input": "height = [1,7,2,5,4,7,3,6]", "output": "36"},
+                {"input": "height = [2,2,2]", "output": "4"}
+            ],
+            "constraints": [
+                "2 <= height.length <= 1000",
+                "0 <= height[i] <= 1000"
+            ],
+            "sampleTestCases": [
+                {"input": {"heights": [1, 7, 2, 5, 4, 7, 3, 6]}, "expectedOutput": 36},
+                {"input": {"heights": [2, 2, 2]}, "expectedOutput": 4}
+            ],
+            "hiddenTestCases": [
+                {"input": {"heights": [1, 1]}, "expectedOutput": 1},
+                {"input": {"heights": [4, 3, 2, 1, 4]}, "expectedOutput": 16},
+                {"input": {"heights": [1, 2, 1]}, "expectedOutput": 2}
+            ]
+        },
+        {
+            "id": "find-min-rotated",
+            "title": "Find Minimum in Rotated Sorted Array",
+            "description": "You are given an array nums which was originally sorted in ascending order and then rotated. Assuming all elements are unique, return the minimum element. Write an algorithm that runs in O(log n) time.",
+            "difficulty": "Medium",
+            "examples": [
+                {"input": "nums = [3,4,5,6,1,2]", "output": "1"},
+                {"input": "nums = [4,5,0,1,2,3]", "output": "0"},
+                {"input": "nums = [4,5,6,7]", "output": "4"}
+            ],
+            "constraints": [
+                "1 <= nums.length <= 1000",
+                "-1000 <= nums[i] <= 1000"
+            ],
+            "sampleTestCases": [
+                {"input": {"nums": [3, 4, 5, 6, 1, 2]}, "expectedOutput": 1},
+                {"input": {"nums": [4, 5, 0, 1, 2, 3]}, "expectedOutput": 0},
+                {"input": {"nums": [4, 5, 6, 7]}, "expectedOutput": 4}
+            ],
+            "hiddenTestCases": [
+                {"input": {"nums": [1]}, "expectedOutput": 1},
+                {"input": {"nums": [2, 1]}, "expectedOutput": 1},
+                {"input": {"nums": [5, 6, 7, 1, 2, 3, 4]}, "expectedOutput": 1}
+            ]
+        },
+        {
+            "id": "reorder-list",
+            "title": "Reorder Linked List",
+            "description": "Given the head of a singly linked-list, reorder the nodes to follow the pattern [0, n-1, 1, n-2, 2, n-3, ...]. You may not modify node values, only pointers.",
+            "difficulty": "Medium",
+            "examples": [
+                {"input": "head = [2,4,6,8]", "output": "[2,8,4,6]"},
+                {"input": "head = [2,4,6,8,10]", "output": "[2,10,4,8,6]"}
+            ],
+            "constraints": [
+                "1 <= Length of the list <= 1000",
+                "1 <= Node.val <= 1000"
+            ],
+            "sampleTestCases": [
+                {"input": {"head": [2, 4, 6, 8]}, "expectedOutput": [2, 8, 4, 6]},
+                {"input": {"head": [2, 4, 6, 8, 10]}, "expectedOutput": [2, 10, 4, 8, 6]}
+            ],
+            "hiddenTestCases": [
+                {"input": {"head": [1]}, "expectedOutput": [1]},
+                {"input": {"head": [1, 2]}, "expectedOutput": [1, 2]},
+                {"input": {"head": [1, 2, 3]}, "expectedOutput": [1, 3, 2]},
+                {"input": {"head": [1, 2, 3, 4, 5, 6]}, "expectedOutput": [1, 6, 2, 5, 3, 4]}
+            ]
+        },
+        {
+            "id": "group-anagrams",
+            "title": "Group Anagrams",
+            "description": "Given an array of strings strs, group all anagrams together into sublists. You may return the output in any order.",
+            "difficulty": "Medium",
+            "examples": [
+                {
+                    "input": "strs = [\"act\",\"pots\",\"tops\",\"cat\",\"stop\",\"hat\"]",
+                    "output": "[[\"hat\"],[\"act\",\"cat\"],[\"stop\",\"pots\",\"tops\"]]"
+                },
+                {"input": "strs = [\"x\"]", "output": "[[\"x\"]]"},
+                {"input": "strs = [\"\"]", "output": "[[\"\"]]"}
+            ],
+            "constraints": [
+                "1 <= strs.length <= 1000",
+                "0 <= strs[i].length <= 100",
+                "strs[i] is made up of lowercase English letters"
+            ],
+            "sampleTestCases": [
+                {
+                    "input": {"strs": ["act", "pots", "tops", "cat", "stop", "hat"]},
+                    "expectedOutput": [["hat"], ["act", "cat"], ["stop", "pots", "tops"]]
+                },
+                {"input": {"strs": ["x"]}, "expectedOutput": [["x"]]},
+                {"input": {"strs": [""]}, "expectedOutput": [[""]]}
+            ],
+            "hiddenTestCases": [
+                {"input": {"strs": []}, "expectedOutput": []},
+                {"input": {"strs": ["ab", "ba", "abc", "bca", "cab"]}, "expectedOutput": [["ab", "ba"], ["abc", "bca", "cab"]]},
+                {"input": {"strs": ["aa", "aa", "a"]}, "expectedOutput": [["aa", "aa"], ["a"]]}
+            ]
+        },
+        {
+            "id": "top-k-frequent",
+            "title": "Top K Frequent Elements",
+            "description": "Given an integer array nums and an integer k, return the k most frequent elements within the array. The answer is always unique. You may return the output in any order.",
+            "difficulty": "Medium",
+            "examples": [
+                {"input": "nums = [1,2,2,3,3,3], k = 2", "output": "[2,3]"},
+                {"input": "nums = [7,7], k = 1", "output": "[7]"}
+            ],
+            "constraints": [
+                "1 <= nums.length <= 10^4",
+                "-1000 <= nums[i] <= 1000",
+                "1 <= k <= number of distinct elements in nums",
+                "The answer is always unique"
+            ],
+            "sampleTestCases": [
+                {"input": {"nums": [1, 2, 2, 3, 3, 3], "k": 2}, "expectedOutput": [2, 3]},
+                {"input": {"nums": [7, 7], "k": 1}, "expectedOutput": [7]}
+            ],
+            "hiddenTestCases": [
+                {"input": {"nums": [1], "k": 1}, "expectedOutput": [1]},
+                {"input": {"nums": [4, 4, 4, 5, 5, 6], "k": 2}, "expectedOutput": [4, 5]},
+                {"input": {"nums": [-1, -1, -2, -2, -2, 3], "k": 2}, "expectedOutput": [-2, -1]}
             ]
         },
         {
@@ -614,6 +1845,33 @@ TECHNICAL_QUESTIONS = {
         }
     ],
     "hard": [
+        {
+            "id": "minimum-window-substring",
+            "title": "Minimum Window Substring",
+            "description": "Given two strings s and t, return the shortest substring of s such that every character in t (including duplicates) is present. If no such substring exists, return an empty string. You may assume the correct output is always unique.",
+            "difficulty": "Hard",
+            "examples": [
+                {"input": "s = \"OUZODYXAZV\", t = \"XYZ\"", "output": "\"YXAZ\""},
+                {"input": "s = \"xyz\", t = \"xyz\"", "output": "\"xyz\""},
+                {"input": "s = \"x\", t = \"xy\"", "output": "\"\""}
+            ],
+            "constraints": [
+                "1 <= s.length <= 1000",
+                "1 <= t.length <= 1000",
+                "s and t consist of uppercase and lowercase English letters"
+            ],
+            "sampleTestCases": [
+                {"input": {"s": "OUZODYXAZV", "t": "XYZ"}, "expectedOutput": "YXAZ"},
+                {"input": {"s": "xyz", "t": "xyz"}, "expectedOutput": "xyz"},
+                {"input": {"s": "x", "t": "xy"}, "expectedOutput": ""}
+            ],
+            "hiddenTestCases": [
+                {"input": {"s": "ADOBECODEBANC", "t": "ABC"}, "expectedOutput": "BANC"},
+                {"input": {"s": "aa", "t": "aa"}, "expectedOutput": "aa"},
+                {"input": {"s": "a", "t": "a"}, "expectedOutput": "a"},
+                {"input": {"s": "a", "t": "aa"}, "expectedOutput": ""}
+            ]
+        },
         {
             "id": "longest-substring",
             "title": "Longest Substring Without Repeating Characters",
@@ -667,20 +1925,111 @@ TECHNICAL_QUESTIONS = {
                 {"input": {"intervals": [[1,4],[0,0],[5,5]]}, "expectedOutput": [[0,0],[1,4],[5,5]]},
                 {"input": {"intervals": [[2,3],[4,5],[6,7],[8,9],[1,10]]}, "expectedOutput": [[1,10]]}
             ]
+        },
+        {
+            "id": "merge-k-sorted-lists",
+            "title": "Merge K Sorted Linked Lists",
+            "description": "You are given an array of k linked lists lists, where each list is sorted in ascending order. Return the sorted linked list that is the result of merging all lists.",
+            "difficulty": "Hard",
+            "examples": [
+                {"input": "lists = [[1,2,4],[1,3,5],[3,6]]", "output": "[1,1,2,3,3,4,5,6]"},
+                {"input": "lists = []", "output": "[]"},
+                {"input": "lists = [[]]", "output": "[]"}
+            ],
+            "constraints": [
+                "0 <= lists.length <= 1000",
+                "0 <= lists[i].length <= 100",
+                "-1000 <= lists[i][j] <= 1000"
+            ],
+            "sampleTestCases": [
+                {"input": {"lists": [[1, 2, 4], [1, 3, 5], [3, 6]]}, "expectedOutput": [1, 1, 2, 3, 3, 4, 5, 6]},
+                {"input": {"lists": []}, "expectedOutput": []},
+                {"input": {"lists": [[]]}, "expectedOutput": []}
+            ],
+            "hiddenTestCases": [
+                {"input": {"lists": [[1], [0]]}, "expectedOutput": [0, 1]},
+                {"input": {"lists": [[-1, 5, 11], [6, 10]]}, "expectedOutput": [-1, 5, 6, 10, 11]},
+                {"input": {"lists": [[], [2], [], [1, 3]]}, "expectedOutput": [1, 2, 3]}
+            ]
         }
     ]
 }
+
+# In-memory per-client pools so question selection doesn't keep repeating.
+# Note: This is best-effort for local/dev. In production you'd back this by Redis/DB.
+_TECHNICAL_QUESTION_POOLS: dict[str, dict[str, list[str]]] = {}
+
+
+def _draw_questions_no_repeat(
+    *,
+    client_id: Optional[str],
+    pool_key: str,
+    candidates: list[dict],
+    count: int,
+) -> list[dict]:
+    """Draw up to `count` questions from `candidates` without replacement for this client."""
+    if count <= 0:
+        return []
+    if not candidates:
+        return []
+
+    if not client_id:
+        # Backward-compatible behavior if no client is provided.
+        import random
+        return random.sample(candidates, min(count, len(candidates)))
+
+    import random
+
+    candidate_by_id = {q.get("id"): q for q in candidates if q.get("id")}
+    candidate_ids = [qid for qid in candidate_by_id.keys()]
+    if not candidate_ids:
+        return []
+
+    client_pools = _TECHNICAL_QUESTION_POOLS.setdefault(client_id, {})
+    pool = client_pools.get(pool_key)
+
+    # Reset pool if missing or if the candidate set changed.
+    if not pool or set(pool) != set(candidate_ids):
+        pool = candidate_ids[:]
+        random.shuffle(pool)
+
+    picked: list[dict] = []
+    # Draw without replacement; if pool runs out, reshuffle remaining candidates.
+    while len(picked) < min(count, len(candidate_ids)):
+        if not pool:
+            pool = candidate_ids[:]
+            random.shuffle(pool)
+        qid = pool.pop()
+        q = candidate_by_id.get(qid)
+        if q:
+            picked.append(q)
+
+    client_pools[pool_key] = pool
+    return picked
 
 
 class TechnicalQuestionsRequest(BaseModel):
     company: str
     role: str
     difficulty: str
+    client_id: Optional[str] = None
 
 class RunCodeRequest(BaseModel):
     code: str
     question_id: str
     language: str = "python"  # python, javascript, java, cpp, c
+    run_mode: str = "run"  # "run" for sample tests, "submit" for all tests
+
+
+class GenerateTechnicalProblemRequest(BaseModel):
+    question: dict
+    client_id: Optional[str] = None
+
+
+class GradeTechnicalProblemRequest(BaseModel):
+    session_id: str
+    code: str
+    language: str = "python"  # python, javascript
     run_mode: str = "run"  # "run" for sample tests, "submit" for all tests
 
 class VoiceInterviewRequest(BaseModel):
@@ -691,57 +2040,83 @@ class VoiceInterviewRequest(BaseModel):
 async def get_technical_questions(request: TechnicalQuestionsRequest):
     """Get technical interview questions based on difficulty."""
     try:
-        import random
-        
-        # Map job difficulty to question difficulty
-        if request.difficulty == "easy":
-            questions = TECHNICAL_QUESTIONS.get("easy", [])
-            num_questions = 2
-        elif request.difficulty == "medium":
-            questions = TECHNICAL_QUESTIONS.get("medium", [])
-            num_questions = 2
-        elif request.difficulty == "hard":
-            # For hard (FAANG), use 1 medium + 1 hard
-            medium_q = TECHNICAL_QUESTIONS.get("medium", [])
-            hard_q = TECHNICAL_QUESTIONS.get("hard", [])
-            if medium_q and hard_q:
-                selected_questions = [random.choice(medium_q), random.choice(hard_q)]
-            else:
-                selected_questions = hard_q if hard_q else medium_q
-            return JSONResponse(content={
+        d = (request.difficulty or "easy").strip().lower()
+        requested = d if d in {"easy", "medium", "hard"} else "easy"
+        candidates = TECHNICAL_QUESTIONS.get(requested, [])
+
+        selected_questions = _draw_questions_no_repeat(
+            client_id=request.client_id,
+            pool_key=f"hardcoded:{requested}:main",
+            candidates=candidates,
+            count=2,
+        )
+
+        return JSONResponse(
+            content={
                 "questions": selected_questions,
                 "company": request.company,
                 "role": request.role,
-                "difficulty": request.difficulty
-            })
-        else:
-            questions = TECHNICAL_QUESTIONS.get("easy", [])
-            num_questions = 2
-
-        # Randomize question selection
-        if len(questions) > num_questions:
-            selected_questions = random.sample(questions, num_questions)
-        else:
-            selected_questions = questions
-
-        return JSONResponse(content={
-            "questions": selected_questions,
-            "company": request.company,
-            "role": request.role,
-            "difficulty": request.difficulty
-        })
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"An error occurred: {str(e)}"
+                "difficulty": request.difficulty,
+            }
         )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
 
 
 def execute_python_code(code: str, test_input: dict, function_name: str = "solution") -> tuple[any, str]:
     """Execute Python code and return result and error message."""
     try:
         # Create a safe execution environment
-        namespace = {"__builtins__": __builtins__}
+        from typing import Any, Dict, List, Optional
+
+        class ListNode:
+            def __init__(self, val: int = 0, next: Optional["ListNode"] = None):
+                self.val = val
+                self.next = next
+
+        def _build_linked_list(values: List[int]) -> Optional[ListNode]:
+            dummy = ListNode(0)
+            cur = dummy
+            for v in values:
+                cur.next = ListNode(v)
+                cur = cur.next
+            return dummy.next
+
+        def _linked_list_to_list(head: Optional[ListNode], limit: int = 5000) -> List[int]:
+            out: List[int] = []
+            cur = head
+            steps = 0
+            while cur is not None and steps < limit:
+                out.append(cur.val)
+                cur = cur.next
+                steps += 1
+            return out
+
+        def _build_cycle(values: List[int], pos: int) -> Optional[ListNode]:
+            head = _build_linked_list(values)
+            if head is None or pos is None or pos < 0:
+                return head
+            # Find tail and pos node
+            tail = head
+            idx = 0
+            pos_node = head if pos == 0 else None
+            while tail.next is not None:
+                tail = tail.next
+                idx += 1
+                if idx == pos:
+                    pos_node = tail
+            if pos_node is not None:
+                tail.next = pos_node
+            return head
+
+        namespace = {
+            "__builtins__": __builtins__,
+            "ListNode": ListNode,
+            "Optional": Optional,
+            "List": List,
+            "Any": Any,
+            "Dict": Dict,
+        }
         exec(code, namespace)
         
         # Try to find the solution function
@@ -770,10 +2145,49 @@ def execute_python_code(code: str, test_input: dict, function_name: str = "solut
         
         # Execute with test input
         # Handle different input formats based on question type
+        if "lists" in test_input:
+            # Merge K Sorted Lists
+            lists_in = test_input.get("lists") or []
+            list_nodes: List[Optional[ListNode]] = []
+            for arr in lists_in:
+                if arr:
+                    list_nodes.append(_build_linked_list(arr))
+                else:
+                    list_nodes.append(None)
+            out_head = solution_func(list_nodes)
+            if out_head is None:
+                return [], None
+            return _linked_list_to_list(out_head), None
+
+        if "head" in test_input:
+            head_vals = test_input.get("head") or []
+            pos = test_input.get("pos")
+            if isinstance(pos, int) and pos >= 0:
+                head_node = _build_cycle(head_vals, pos)
+            else:
+                head_node = _build_linked_list(head_vals)
+
+            # Reorder list modifies in place and returns None
+            if function_name == "reorderList":
+                solution_func(head_node)
+                return _linked_list_to_list(head_node), None
+
+            out = solution_func(head_node)
+            if isinstance(out, ListNode) or out is None:
+                return _linked_list_to_list(out), None
+            return out, None
+
         if "nums" in test_input and "target" in test_input:
             # Two Sum problem
             nums_copy = test_input["nums"].copy() if isinstance(test_input["nums"], list) else test_input["nums"]
             result = solution_func(nums_copy, test_input["target"])
+        elif "nums" in test_input and "k" in test_input:
+            # Top K Frequent
+            nums_copy = test_input["nums"].copy() if isinstance(test_input["nums"], list) else test_input["nums"]
+            result = solution_func(nums_copy, test_input["k"])
+        elif "s" in test_input and "t" in test_input:
+            # Two-string problems (Valid Anagram)
+            result = solution_func(test_input["s"], test_input["t"])
         elif "s" in test_input:
             # String problems - handle both string and list inputs
             s_input = test_input["s"]
@@ -827,16 +2241,19 @@ def execute_javascript_code(code: str, test_input: dict, function_name: str = "s
 const testInput = {json.dumps(test_input)};
 let result;
 try {{
-    if (typeof solution === 'function') {{
-        if (testInput.nums !== undefined && testInput.target !== undefined) {{
-            result = solution(testInput.nums, testInput.target);
-        }} else if (testInput.s !== undefined) {{
-            result = solution(testInput.s);
-        }} else {{
-            result = solution(Object.values(testInput)[0]);
-        }}
+    const fn = (typeof {function_name} === 'function') ? {function_name} : ((typeof solution === 'function') ? solution : null);
+    if (!fn) throw new Error('Solution function not found');
+
+    if (testInput.nums !== undefined && testInput.target !== undefined) {{
+        result = fn(testInput.nums, testInput.target);
+    }} else if (testInput.nums !== undefined && testInput.k !== undefined) {{
+        result = fn(testInput.nums, testInput.k);
+    }} else if (testInput.s !== undefined && testInput.t !== undefined) {{
+        result = fn(testInput.s, testInput.t);
+    }} else if (testInput.s !== undefined) {{
+        result = fn(testInput.s);
     }} else {{
-        throw new Error('Solution function not found');
+        result = fn(Object.values(testInput)[0]);
     }}
     console.log(JSON.stringify({{result: result}}));
 }} catch (error) {{
@@ -875,10 +2292,262 @@ try {{
         return None, str(e)
 
 
+def execute_python_code_generated(code: str, test_input: dict, function_name: str = "solution") -> tuple[Any, Optional[str]]:
+    """Execute Python code for generated problems.
+
+    Generated problems always call `solution(input)` with the entire input dict.
+    """
+    try:
+        namespace = {"__builtins__": __builtins__}
+        exec(code, namespace)
+
+        solution_func = None
+
+        if "Solution" in namespace:
+            solution_class = namespace["Solution"]
+            solution_instance = solution_class()
+            if hasattr(solution_instance, function_name):
+                solution_func = getattr(solution_instance, function_name)
+
+        if solution_func is None and function_name in namespace:
+            solution_func = namespace[function_name]
+
+        if solution_func is None:
+            for key, value in namespace.items():
+                if callable(value) and not key.startswith("_") and key not in [
+                    "Solution",
+                    "print",
+                    "len",
+                    "range",
+                    "str",
+                    "int",
+                    "list",
+                    "dict",
+                    "set",
+                    "tuple",
+                ]:
+                    solution_func = value
+                    break
+
+        if solution_func is None:
+            return None, "No solution function found. Please define `solution(input)` or `class Solution` with a `solution` method."
+
+        result = solution_func(test_input)
+        return result, None
+    except Exception as e:
+        import traceback
+
+        error_msg = str(e)
+        tb = traceback.format_exc()
+        tb_lines = tb.split("\n")
+        if len(tb_lines) > 5:
+            error_msg = f"{error_msg}\n{tb_lines[-3]}"
+        return None, error_msg
+
+
+def execute_javascript_code_generated(code: str, test_input: dict, function_name: str = "solution") -> tuple[Any, Optional[str]]:
+    """Execute JavaScript code for generated problems.
+
+    Generated problems always call `solution(input)` with the entire input object.
+    """
+    import subprocess
+    import json as _json
+    import tempfile
+
+    try:
+        test_code = f"""
+{code}
+
+const testInput = {_json.dumps(test_input)};
+let result;
+try {{
+  if (typeof {function_name} === 'function') {{
+    result = {function_name}(testInput);
+  }} else if (typeof solution === 'function') {{
+    result = solution(testInput);
+  }} else {{
+    throw new Error('Solution function not found');
+  }}
+  console.log(JSON.stringify({{result: result}}));
+}} catch (error) {{
+  console.error(JSON.stringify({{error: error.message}}));
+  process.exit(1);
+}}
+"""
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".js", delete=False) as f:
+            f.write(test_code)
+            temp_file = f.name
+
+        try:
+            result = subprocess.run(
+                ["node", temp_file],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+
+            if result.returncode != 0:
+                error_output = result.stderr
+                try:
+                    error_data = _json.loads(error_output)
+                    return None, error_data.get("error", error_output)
+                except Exception:
+                    return None, error_output
+
+            output_data = _json.loads(result.stdout)
+            return output_data.get("result"), None
+        finally:
+            os.unlink(temp_file)
+    except subprocess.TimeoutExpired:
+        return None, "Execution timeout"
+    except Exception as e:
+        return None, str(e)
+
+
+@app.post("/api/technical/problem")
+async def generate_technical_problem(request: GenerateTechnicalProblemRequest):
+    """Generate an original practice prompt + tests for a selected question metadata."""
+    try:
+        _prune_generated_technical_sessions()
+
+        question = request.question or {}
+        qid = str(question.get("id") or question.get("question_id") or "").strip()
+        client_id = (request.client_id or "").strip() or "anon"
+        index_key = f"{client_id}:{qid}" if qid else ""
+
+        # If we already generated a session for this client + question, reuse it.
+        if index_key and index_key in _generated_technical_session_index:
+            existing_id = _generated_technical_session_index[index_key]
+            sess = _generated_technical_sessions.get(existing_id)
+            if sess:
+                return JSONResponse(
+                    content={
+                        "session_id": existing_id,
+                        "problem": sess["problem"],
+                        "question": sess.get("question") or question,
+                    }
+                )
+
+        try:
+            problem = _generate_original_problem_from_metadata(question)
+        except Exception as e:
+            print(f"[WARN] Problem generation failed, using fallback: {e}")
+            problem = _validate_generated_problem_payload(_generate_problem_fallback(question))
+
+        import uuid
+
+        session_id = str(uuid.uuid4())
+        _generated_technical_sessions[session_id] = {
+            "created_at": time.time(),
+            "question": question,
+            "problem": problem,
+        }
+        if index_key:
+            _generated_technical_session_index[index_key] = session_id
+
+        return JSONResponse(content={"session_id": session_id, "problem": problem, "question": question})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate problem: {str(e)}")
+
+
+@app.post("/api/technical/grade")
+async def grade_technical_problem(request: GradeTechnicalProblemRequest):
+    """Grade candidate code against a generated problem session."""
+    try:
+        sess = _generated_technical_sessions.get(request.session_id)
+        if not sess:
+            raise HTTPException(status_code=404, detail="Problem session not found (it may have expired).")
+
+        problem = sess.get("problem") or {}
+        run_mode = (request.run_mode or "run").strip().lower()
+        if run_mode not in {"run", "submit"}:
+            run_mode = "run"
+
+        sample_tests = problem.get("sample_tests") or []
+        hidden_tests = problem.get("hidden_tests") or []
+        test_cases = sample_tests + hidden_tests if run_mode == "submit" else sample_tests
+
+        test_results = []
+        passed_count = 0
+        total_tests = len(test_cases)
+
+        for idx, test_case in enumerate(test_cases):
+            test_input = test_case.get("input") or {}
+            expected_output = test_case.get("expectedOutput")
+
+            if request.language == "python":
+                actual_output, error = execute_python_code_generated(request.code, test_input, "solution")
+            elif request.language == "javascript":
+                actual_output, error = execute_javascript_code_generated(request.code, test_input, "solution")
+            else:
+                return JSONResponse(
+                    content={
+                        "passed": False,
+                        "score": 0,
+                        "passed_tests": 0,
+                        "total_tests": total_tests,
+                        "test_results": [
+                            {
+                                "test_case": 1,
+                                "input": test_input,
+                                "expected_output": expected_output,
+                                "actual_output": None,
+                                "passed": False,
+                                "error": "Only python and javascript are supported for autograding.",
+                            }
+                        ],
+                    }
+                )
+
+            if error:
+                passed = False
+                actual_output = None
+            else:
+                passed = compare_outputs(actual_output, expected_output)
+
+            test_results.append(
+                {
+                    "test_case": idx + 1,
+                    "input": test_input,
+                    "expected_output": expected_output,
+                    "actual_output": actual_output,
+                    "passed": passed,
+                    "error": error,
+                }
+            )
+
+            if passed:
+                passed_count += 1
+
+        score = (passed_count / total_tests) * 100 if total_tests > 0 else 0
+        all_passed = passed_count == total_tests
+
+        return JSONResponse(
+            content={
+                "passed": all_passed,
+                "score": round(score, 1),
+                "passed_tests": passed_count,
+                "total_tests": total_tests,
+                "test_results": test_results,
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
+
+
 @app.post("/api/run-code")
 async def run_code(request: RunCodeRequest):
     """Evaluate code against test cases with actual execution."""
     try:
+        if request.language not in {"python", "javascript"}:
+            raise HTTPException(
+                status_code=400,
+                detail="Autograding currently supports Python and JavaScript only.",
+            )
+
         # Find the question
         question = None
         for diff_level in ["easy", "medium", "hard"]:
@@ -892,6 +2561,18 @@ async def run_code(request: RunCodeRequest):
         if not question:
             print(f"Question not found: {request.question_id}")
             raise HTTPException(status_code=404, detail=f"Question not found: {request.question_id}")
+
+        linked_list_only_python = {
+            "reverse-linked-list",
+            "linked-list-cycle",
+            "reorder-list",
+            "merge-k-sorted-lists",
+        }
+        if request.language == "javascript" and question["id"] in linked_list_only_python:
+            raise HTTPException(
+                status_code=400,
+                detail="Linked-list questions are currently autograded in Python only.",
+            )
         
         # Determine which test cases to use based on run_mode
         if request.run_mode == "submit":
@@ -911,18 +2592,70 @@ async def run_code(request: RunCodeRequest):
         # Determine function name based on question
         function_name_map = {
             "two-sum": "twoSum",
+            "contains-duplicate": "hasDuplicate",
             "reverse-string": "reverseString",
+            "valid-anagram": "isAnagram",
+            "valid-palindrome": "isPalindrome",
             "palindrome-number": "isPalindrome",
+            "best-time-stock": "maxProfit",
             "fizz-buzz": "fizzBuzz",
             "longest-substring": "lengthOfLongestSubstring",
             "valid-parentheses": "isValid",
+            "longest-consecutive": "longestConsecutive",
+            "three-sum": "threeSum",
+            "container-with-most-water": "maxArea",
+            "find-min-rotated": "findMin",
             "group-anagrams": "groupAnagrams",
+            "top-k-frequent": "topKFrequent",
+            "minimum-window-substring": "minWindow",
             "product-except-self": "productExceptSelf",
-            "merge-intervals": "merge"
+            "merge-intervals": "merge",
+            "reverse-linked-list": "reverseList",
+            "linked-list-cycle": "hasCycle",
+            "reorder-list": "reorderList",
+            "merge-k-sorted-lists": "mergeKLists",
         }
         function_name = function_name_map.get(question["id"], "solution")
 
         print(f"Using function name: {function_name}")
+
+        def _normalize_for_compare(qid: str, value: Any) -> Any:
+            if value is None:
+                return None
+            if qid == "three-sum" and isinstance(value, list):
+                try:
+                    triplets = []
+                    for t in value:
+                        if isinstance(t, list):
+                            triplets.append(sorted(t))
+                        else:
+                            triplets.append(t)
+                    return sorted(triplets, key=lambda x: "|".join(map(str, x)) if isinstance(x, list) else str(x))
+                except Exception:
+                    return value
+            if qid == "top-k-frequent" and isinstance(value, list):
+                try:
+                    return sorted(value)
+                except Exception:
+                    return value
+            if qid == "group-anagrams" and isinstance(value, list):
+                normalized_groups = []
+                for g in value:
+                    if isinstance(g, list):
+                        try:
+                            normalized_groups.append(sorted(g))
+                        except Exception:
+                            normalized_groups.append(g)
+                    else:
+                        normalized_groups.append(g)
+                try:
+                    return sorted(
+                        normalized_groups,
+                        key=lambda grp: "|".join(map(str, grp)) if isinstance(grp, list) else str(grp),
+                    )
+                except Exception:
+                    return normalized_groups
+            return value
 
         for idx, test_case in enumerate(test_cases):
             test_input = test_case["input"]
@@ -934,8 +2667,7 @@ async def run_code(request: RunCodeRequest):
             elif request.language == "javascript":
                 actual_output, error = execute_javascript_code(request.code, test_input, function_name)
             else:
-                # For other languages, use Python execution as fallback
-                actual_output, error = execute_python_code(request.code, test_input, function_name)
+                actual_output, error = None, "Unsupported language"
             
             # Compare results
             passed = False
@@ -944,7 +2676,11 @@ async def run_code(request: RunCodeRequest):
                 actual_output = None
             else:
                 # Deep comparison of results
-                passed = compare_outputs(actual_output, expected_output)
+                qid = question["id"]
+                passed = compare_outputs(
+                    _normalize_for_compare(qid, actual_output),
+                    _normalize_for_compare(qid, expected_output),
+                )
 
             print(f"Test {idx + 1}: Expected={expected_output}, Actual={actual_output}, Passed={passed}, Error={error}")
 
@@ -983,30 +2719,33 @@ async def run_code(request: RunCodeRequest):
         )
 
 
-def compare_outputs(actual: any, expected: any) -> bool:
-    """Compare actual and expected outputs, handling lists, nested structures."""
-    import json
-    
+def compare_outputs(actual: Any, expected: Any) -> bool:
+    """Compare actual and expected outputs, handling nested JSON-ish structures."""
     # Handle None cases
     if actual is None and expected is None:
         return True
     if actual is None or expected is None:
         return False
-    
-    # Convert to comparable format
-    try:
-        # For lists/arrays, compare element-wise
-        if isinstance(actual, list) and isinstance(expected, list):
-            if len(actual) != len(expected):
+
+    # Dicts
+    if isinstance(actual, dict) and isinstance(expected, dict):
+        if actual.keys() != expected.keys():
+            return False
+        for k in actual.keys():
+            if not compare_outputs(actual.get(k), expected.get(k)):
                 return False
-            # Sort if order might differ (for some problems)
-            # For most LeetCode problems, order matters, so don't sort
-            return actual == expected
-        
-        # For primitive types
+        return True
+
+    # Lists / tuples
+    if isinstance(actual, (list, tuple)) and isinstance(expected, (list, tuple)):
+        if len(actual) != len(expected):
+            return False
+        return all(compare_outputs(a, b) for a, b in zip(actual, expected))
+
+    # Primitive / fallback
+    try:
         return actual == expected
-    except:
-        # Fallback to string comparison
+    except Exception:
         return str(actual) == str(expected)
 
 
@@ -1034,7 +2773,7 @@ async def start_voice_interview(request: VoiceInterviewRequest):
         client = genai.Client(api_key=GEMINI_API_KEY)
         response = call_gemini_with_retry(
             client=client,
-            model="gemini-2.5-flash",
+            model="gemini-3-flash-preview",
             contents=prompt,
             max_retries=3,
             initial_delay=2
@@ -1123,15 +2862,44 @@ async def handle_voice_response(
         
         session = interview_sessions[session_id]
         
-        # Transcribe audio using Gemini's multimodal API or use Whisper
-        # For now, using a simplified version - in production use Whisper API
+        # Transcribe audio using Google Gemini
         audio_content = await audio.read()
         
-        # For actual transcription, you would use:
-        # import openai
-        # transcript = openai.Audio.transcribe("whisper-1", audio_file)
-        # For now, mock transcription
-        transcript = "This is a mock transcript of the candidate's response."
+        transcript = ""
+        
+        try:
+            client = genai.Client(api_key=GEMINI_API_KEY)
+            
+            # Prepare audio for Gemini (base64 encode)
+            audio_b64 = base64.b64encode(audio_content).decode('utf-8')
+            
+            # Use Gemini to transcribe the audio
+            prompt_parts = [
+                {
+                    "text": "Please transcribe the following audio recording. Provide ONLY the transcription, without any additional commentary or formatting. If the audio is unclear or silent, respond with '[inaudible]'."
+                },
+                {
+                    "inline_data": {
+                        "mime_type": "audio/wav",
+                        "data": audio_b64
+                    }
+                }
+            ]
+            
+            response = call_gemini_with_retry(
+                client=client,
+                model="gemini-2.0-flash-exp",  # Supports audio
+                contents=prompt_parts,
+                max_retries=2,
+                initial_delay=1
+            )
+            
+            transcript = response.text.strip()
+            print(f"[Gemini] Transcribed: {transcript[:100]}...")
+            
+        except Exception as e:
+            print(f"[ERROR] Gemini transcription failed: {str(e)}")
+            transcript = "[Audio transcription unavailable]"
         
         # Add user response to conversation history
         session["conversation_history"].append({
@@ -1155,7 +2923,7 @@ Respond with ONLY a number from 0-100 based on how well the response meets these
         client = genai.Client(api_key=GEMINI_API_KEY)
         eval_response = call_gemini_with_retry(
             client=client,
-            model="gemini-2.5-flash",
+            model="gemini-3-flash-preview",
             contents=evaluation_prompt,
             max_retries=3,
             initial_delay=2
@@ -1220,7 +2988,7 @@ Return ONLY the question, nothing else."""
         client = genai.Client(api_key=GEMINI_API_KEY)
         response = call_gemini_with_retry(
             client=client,
-            model="gemini-2.5-flash",
+            model="gemini-3-flash-preview",
             contents=prompt,
             max_retries=3,
             initial_delay=2
@@ -1299,18 +3067,20 @@ Return ONLY the question, nothing else."""
         )
 
 
-async def evaluate_interview_performance(interview_state: dict, client: genai.Client) -> int:
+async def evaluate_interview_performance(interview_state: dict, client: genai.Client) -> dict:
     """
     Evaluate the candidate's performance based on the conversation history.
-    Returns a score from 0-100.
+    Returns a dict with score and metadata.
     """
     try:
+        scoring_version = "star_v3_guardrails_2026-01-13"
+
         # Extract conversation for evaluation
         conversation = interview_state.get("conversation_history", [])
 
         if not conversation:
             print("[Evaluation] No conversation history found, returning default score")
-            return 50
+            return {"score": 50, "disqualified": False, "flags": {}, "scoring_version": scoring_version}
 
         # Build conversation text
         conversation_text = "\n".join([
@@ -1318,8 +3088,173 @@ async def evaluate_interview_performance(interview_state: dict, client: genai.Cl
             for msg in conversation
         ])
 
-    # STAR-based evaluation prompt (JSON) with explicit penalties.
-    evaluation_prompt = f"""You are an expert behavioral interview evaluator.
+        # Deterministic disqualifying-content guardrail.
+        # If the transcript contains threats/violence/illegal intent/unethical intent, hard-cap the score.
+        try:
+            def _norm_text(s: str) -> str:
+                return re.sub(r"\s+", " ", (s or "").strip())
+
+            def _extract_candidate_answers(conv: list[dict], max_answers: int) -> list[str]:
+                # Conversation history can contain incremental transcripts; de-dupe to get
+                # one best-effort string per answer.
+                answers: list[str] = []
+                for msg in conv:
+                    if not isinstance(msg, dict) or msg.get("role") != "candidate":
+                        continue
+                    t = _norm_text(str(msg.get("content", "")))
+                    if not t:
+                        continue
+                    if not answers:
+                        answers.append(t)
+                        continue
+                    prev = answers[-1]
+                    # Replace if it's an updated/longer version of the same transcript.
+                    if t in prev:
+                        continue
+                    if prev in t:
+                        answers[-1] = t
+                        continue
+                    answers.append(t)
+                if max_answers > 0 and len(answers) > max_answers:
+                    answers = answers[-max_answers:]
+                return answers
+
+            def _is_nonsense_answer(text: str) -> bool:
+                t = _norm_text(text)
+                if not t:
+                    return True
+                lower = t.casefold()
+
+                # Common non-answers / filler.
+                if re.search(r"\b(pass|skip|n/?a|no\s+comment|prefer\s+not\s+to\s+say)\b", lower):
+                    return True
+                if re.search(r"\b(idk|i\s+don'?t\s+know|no\s+idea|whatever)\b", lower) and len(lower) < 120:
+                    return True
+                if re.search(r"\b(asdf|qwer|lorem|ipsum|blah)\b", lower):
+                    return True
+
+                words = re.findall(r"[a-zA-Z']+", lower)
+                wc = len(words)
+                if wc < 6:
+                    return True
+                uniq = len(set(words))
+                uniq_ratio = uniq / max(1, wc)
+                # Repeating the same word over and over.
+                from collections import Counter
+                top = Counter(words).most_common(1)[0][1] if words else 0
+                if wc >= 10 and (top / wc) >= 0.45:
+                    return True
+                # Mostly non-alphabetic characters.
+                alpha = len(re.findall(r"[A-Za-z]", t))
+                non_ws = len(re.findall(r"\S", t))
+                if non_ws > 0 and (alpha / non_ws) < 0.35:
+                    return True
+                # Extremely low lexical diversity in a longer answer.
+                if wc >= 25 and uniq_ratio < 0.25:
+                    return True
+
+                return False
+
+            max_answers = int(interview_state.get("max_questions", 3) or 3)
+            candidate_answers = _extract_candidate_answers(conversation, max_answers=max_answers)
+            candidate_text = "\n".join(candidate_answers).strip()
+            ct = candidate_text.casefold()
+
+            # Deterministic disqualification for clearly unacceptable workplace behavior admissions.
+            # (Even if the model evaluator misses it.)
+            if re.search(r"\b(i\s*(always|usually|often)\s*)?(yell|scream|shout)\b", ct) and re.search(r"\b(coworker|co-worker|colleague|manager|team|people)\b", ct):
+                print("[Evaluation] Disqualifying content detected: admits yelling at coworkers")
+                return {
+                    "score": 5,
+                    "disqualified": True,
+                    "flags": {"unprofessional": True, "harassment_hate": False, "sexual": False, "violence_threat": False},
+                    "scoring_version": scoring_version,
+                }
+
+            # Deterministic disqualification for admissions of intentional non-performance/abandonment.
+            # Examples: "I did no work", "I took zero action", "I left my team", "I never came back".
+            no_work = re.search(
+                r"\b(i\s*(did|do)\s*(no|zero)\s*(work|action)|i\s*(did|do)\s*nothing|"
+                r"didn'?t\s*really\s*do\s*any\s*work|took\s*(no|zero)\s*action|"
+                r"i\s*(never|didn'?t)\s*(help|contribute)|i\s*(didn'?t)\s*(contribute|participate))\b",
+                ct,
+            )
+            abandonment = re.search(
+                r"\b(left\s+(my\s+)?team\s+(to\s+)?(handle|do)\s+(it\s+)?(by\s+)?themselves|"
+                r"i\s*(went|left)\s+.*\s+and\s+never\s+came\s+back|ghosted|abandoned|"
+                r"i\s*(just\s*)?stopped\s*(working|showing\s+up)|no\s*show)\b",
+                ct,
+            )
+            if no_work or abandonment:
+                print("[Evaluation] Disqualifying content detected: admits no work / abandonment")
+                return {
+                    "score": 10,
+                    "disqualified": True,
+                    "flags": {"unprofessional": True, "harassment_hate": False, "sexual": False, "violence_threat": False},
+                    "scoring_version": scoring_version,
+                }
+
+            # Vague but clearly disqualifying intent.
+            vague_threat = re.search(r"\b(i\s*(would|'d)\s*do|i\s*will\s*do)\b[\s\S]{0,40}\b(bad\s+things|something\s+bad)\b", ct)
+
+            # Explicit violence/threat language.
+            violence = re.search(r"\b(kill|murder|shoot|stab|bomb|rape|assault|attack|hurt|harm)\b", ct)
+
+            # Illegal/unethical intent.
+            unethical = re.search(r"\b(steal|fraud|scam|embezzle|sabotage|blackmail|extort|leak\s+secrets|dox|hack)\b", ct)
+
+            # Conditional intent tied to hiring/employment context.
+            employment_context = re.search(r"\b(if\s+i\s*(get|got)\s+hired|if\s+you\s+hire\s+me|once\s+i\'?m\s+hired)\b", ct)
+
+            if candidate_text:
+                if violence:
+                    print("[Evaluation] Disqualifying content detected: violence/threat")
+                    return {
+                        "score": 5,
+                        "disqualified": True,
+                        "flags": {"unprofessional": True, "harassment_hate": False, "sexual": False, "violence_threat": True},
+                        "scoring_version": scoring_version,
+                    }
+                if unethical:
+                    print("[Evaluation] Disqualifying content detected: illegal/unethical intent")
+                    return {
+                        "score": 10,
+                        "disqualified": True,
+                        "flags": {"unprofessional": True, "harassment_hate": False, "sexual": False, "violence_threat": False},
+                        "scoring_version": scoring_version,
+                    }
+                if vague_threat and employment_context:
+                    print("[Evaluation] Disqualifying content detected: vague threat in hiring context")
+                    return {
+                        "score": 10,
+                        "disqualified": True,
+                        "flags": {"unprofessional": True, "harassment_hate": False, "sexual": False, "violence_threat": False},
+                        "scoring_version": scoring_version,
+                    }
+
+                # Deterministic nonsense/non-answer caps.
+                if candidate_answers:
+                    nonsense_flags = [
+                        _is_nonsense_answer(a)
+                        for a in candidate_answers
+                    ]
+                    nonsense_count = sum(1 for x in nonsense_flags if x)
+                    if nonsense_count == len(candidate_answers):
+                        print("[Evaluation] All candidate answers appear to be nonsense/non-answers")
+                        return {"score": 0, "disqualified": True, "flags": {"unprofessional": True}, "scoring_version": scoring_version}
+                    if nonsense_count >= 2:
+                        print(f"[Evaluation] Majority nonsense/non-answers ({nonsense_count}/{len(candidate_answers)})")
+                        return {"score": 5, "disqualified": True, "flags": {"unprofessional": True}, "scoring_version": scoring_version}
+                    if nonsense_count == 1:
+                        # One non-answer should heavily penalize overall score.
+                        print("[Evaluation] At least one answer appears to be nonsense/non-answer")
+                        # Don't return immediately; allow model scoring but cap later.
+        except Exception:
+            # Never fail evaluation due to guardrail checks.
+            pass
+
+        # STAR-based evaluation prompt (JSON) with explicit penalties.
+        evaluation_prompt = f"""You are an expert behavioral interview evaluator.
 
 You must score the CANDIDATE using the STAR method per answer:
 - Situation (S): context and constraints
@@ -1342,7 +3277,7 @@ SCORING RULES:
     - Professionalism (0-5): respectful, workplace-appropriate
 2) Compute an overall_score (0-100) that primarily reflects the average quality across answers.
 3) STRICT PENALTIES:
-    - If the candidate uses hateful/harassing language, threats, sexual content, or otherwise extremely unprofessional/offensive content, the overall_score must be severely reduced.
+    - If the candidate uses hateful/harassing language, threats, sexual content, violence, or expresses intent to do harmful/illegal/unethical actions (even vaguely), the overall_score must be severely reduced.
     - If content would disqualify a candidate in a real interview, overall_score should be 0-20.
 
 OUTPUT FORMAT:
@@ -1402,9 +3337,12 @@ Return STRICT JSON only (no markdown, no commentary), with exactly these keys:
             violence_threat = bool(flags.get("violence_threat"))
             unprofessional = bool(flags.get("unprofessional"))
 
+            disqualified = False
+
             # Hard caps for disqualifying content.
             if harassment_hate or sexual or violence_threat:
                 score = min(score, 15)
+                disqualified = True
             if unprofessional:
                 score = min(score, 35)
 
@@ -1414,21 +3352,68 @@ Return STRICT JSON only (no markdown, no commentary), with exactly these keys:
                 min_prof = min(int(a.get("professionalism", 5)) for a in per if isinstance(a, dict)) if per else 5
                 if min_prof <= 1:
                     score = min(score, 20)
+                    disqualified = True
             except Exception:
                 pass
 
-            print(f"[Evaluation] STAR score: {score} (flags={flags})")
-            return score
+            # If any answer is clearly a non-answer/nonsense, cap the overall score.
+            try:
+                max_answers = int(interview_state.get("max_questions", 3) or 3)
+                candidate_answers = []
+                for msg in conversation:
+                    if not isinstance(msg, dict) or msg.get("role") != "candidate":
+                        continue
+                    t = re.sub(r"\s+", " ", str(msg.get("content", "")).strip())
+                    if not t:
+                        continue
+                    if not candidate_answers:
+                        candidate_answers.append(t)
+                        continue
+                    prev = candidate_answers[-1]
+                    if t in prev:
+                        continue
+                    if prev in t:
+                        candidate_answers[-1] = t
+                        continue
+                    candidate_answers.append(t)
+                if max_answers > 0 and len(candidate_answers) > max_answers:
+                    candidate_answers = candidate_answers[-max_answers:]
+
+                def _is_nonsense_quick(text: str) -> bool:
+                    lower = re.sub(r"\s+", " ", (text or "").strip()).casefold()
+                    if not lower:
+                        return True
+                    if re.search(r"\b(pass|skip|n/?a|no\s+comment)\b", lower):
+                        return True
+                    words = re.findall(r"[a-zA-Z']+", lower)
+                    if len(words) < 6:
+                        return True
+                    return False
+
+                nonsense_count = sum(1 for a in candidate_answers if _is_nonsense_quick(a))
+                if candidate_answers and nonsense_count == len(candidate_answers):
+                    score = min(score, 0)
+                    disqualified = True
+                elif nonsense_count >= 2:
+                    score = min(score, 5)
+                    disqualified = True
+                elif nonsense_count == 1:
+                    score = min(score, 20)
+            except Exception:
+                pass
+
+            print(f"[Evaluation] STAR score: {score} (flags={flags}, disqualified={disqualified})")
+            return {"score": score, "disqualified": disqualified, "flags": flags, "scoring_version": scoring_version}
 
         # If parsing fails, fall back conservatively (do not return a generous score).
         print(f"[Evaluation] Could not parse STAR JSON from: {raw[:200]}...")
-        return 40
+        return {"score": 40, "disqualified": False, "flags": {}, "scoring_version": scoring_version}
 
     except Exception as e:
         print(f"[Evaluation] Error evaluating performance: {str(e)}")
         import traceback
         traceback.print_exc()
-        return 40  # Conservative fallback on error
+        return {"score": 40, "disqualified": False, "flags": {}, "scoring_version": "star_v3_guardrails_2026-01-13"}
 
 
 @app.websocket("/ws/behavioral-interview")
@@ -1512,9 +3497,11 @@ async def behavioral_interview_websocket(websocket: WebSocket):
 Your role:
 1. You will be given the exact question text to ask.
 2. Ask the question VERBATIM (no paraphrasing, no extra preamble).
-3. Do NOT speak, acknowledge, or ask follow-ups unless you receive an explicit realtime text instruction.
-4. After the candidate answers, remain silent until instructed.
-5. After the final answer, deliver a brief closing remark ONLY when instructed.
+3. CRITICAL: Do NOT interrupt the candidate while they are speaking. Wait for long pauses (3+ seconds) before responding.
+4. Do NOT say filler words like "okay", "mm-hmm", "I see" while the candidate is speaking.
+5. Do NOT speak, acknowledge, or ask follow-ups unless you receive an explicit realtime text instruction.
+6. After the candidate answers, remain silent until instructed.
+7. After the final answer, deliver a brief closing remark ONLY when instructed.
 
 Current question number: {interview_state['questions_asked'] + 1} of {interview_state['max_questions']}"""
 
@@ -1535,6 +3522,16 @@ Current question number: {interview_state['questions_asked'] + 1} of {interview_
             "system_instruction": {
                 "role": "system",
                 "parts": [{"text": system_instruction}]
+            },
+            # Configure turn detection to be less sensitive and reduce interruptions
+            "generation_config": {
+                "speech_config": {
+                    "voice_config": {
+                        "prebuilt_voice_config": {
+                            "voice_name": "Puck"
+                        }
+                    }
+                }
             }
         }
 
@@ -1744,10 +3741,21 @@ Current question number: {interview_state['questions_asked'] + 1} of {interview_
                                         elif awaiting_close_turn_complete:
                                             # Closing message finished; now evaluate.
                                             print(f"[WebSocket] Evaluating interview performance...")
-                                            final_score = await evaluate_interview_performance(interview_state, client)
+                                            try:
+                                                await websocket.send_json({
+                                                    "type": "reviewing",
+                                                    "message": "Your interview is being reviewed...",
+                                                })
+                                            except Exception:
+                                                pass
+                                            eval_result = await evaluate_interview_performance(interview_state, client)
+                                            final_score = int(eval_result.get("score", 0))
                                             await websocket.send_json({
                                                 "type": "interview_complete",
-                                                "score": final_score
+                                                "score": final_score,
+                                                "disqualified": bool(eval_result.get("disqualified", False)),
+                                                "flags": eval_result.get("flags", {}),
+                                                "scoring_version": eval_result.get("scoring_version", "")
                                             })
                                             print(f"[WebSocket] Interview complete with score: {final_score}")
                                             done = True

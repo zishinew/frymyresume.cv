@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import './JobSimulator.css'
 import { jobs } from '../data/jobs'
@@ -8,16 +8,47 @@ import TechnicalInterview from '../components/TechnicalInterview'
 import BehavioralInterviewLive from '../components/BehavioralInterviewLive'
 import LoadingScreen from '../components/LoadingScreen'
 
-type Stage = 'job-selection' | 'resume-upload' | 'resume-screening' | 'technical' | 'technical-passed' | 'behavioral' | 'result'
+type Stage = 'source-selection' | 'job-selection' | 'real-job-selection' | 'resume-upload' | 'resume-screening' | 'technical' | 'technical-passed' | 'behavioral' | 'result'
+
+type JobSource = 'preset' | 'real'
+
+type RealJobRow = {
+  source: 'simplifyjobs_summer2026'
+  category?: string
+  company: string
+  company_url?: string
+  role: string
+  location: string
+  apply_url?: string
+  age?: string
+  details?: {
+    summary?: string
+    responsibilities?: string[]
+    requirements?: string[]
+    qualifications?: string[]
+    nice_to_have?: string[]
+  }
+  raw?: {
+    row?: string
+    company_cell?: string
+    role_cell?: string
+    location_cell?: string
+    application_cell?: string
+    age_cell?: string
+  }
+}
+
+type SelectedJob = (Job & { source: 'preset' }) | (Job & { source: 'real'; real?: RealJobRow })
 
 interface ApplicationData {
-  selectedJob: Job | null
+  selectedJob: SelectedJob | null
   resume: File | null
 }
 
 function JobSimulator() {
   const navigate = useNavigate()
-  const [stage, setStage] = useState<Stage>('job-selection')
+  const [stage, setStage] = useState<Stage>('source-selection')
+  const [jobSource, setJobSource] = useState<JobSource | null>(null)
   const [applicationData, setApplicationData] = useState<ApplicationData>({
     selectedJob: null,
     resume: null,
@@ -27,7 +58,42 @@ function JobSimulator() {
   const [behavioralScore, setBehavioralScore] = useState<number>(0)
   const [finalResult, setFinalResult] = useState<any>(null)
   const [loading, setLoading] = useState(false)
+  const [loadingText, setLoadingText] = useState<string>('')
   const [selectedType, setSelectedType] = useState<'easy' | 'medium' | 'hard' | 'all'>('all')
+
+  const [realJobs, setRealJobs] = useState<RealJobRow[]>([])
+  const [realJobsQuery, setRealJobsQuery] = useState<string>('')
+  const [realJobsError, setRealJobsError] = useState<string>('')
+  const [realJobsReloadToken, setRealJobsReloadToken] = useState<number>(0)
+
+  const [realJobDetailsLoading, setRealJobDetailsLoading] = useState<boolean>(false)
+  const [realJobDetailsError, setRealJobDetailsError] = useState<string>('')
+
+  useEffect(() => {
+    const load = async () => {
+      if (stage !== 'real-job-selection') return
+      setRealJobsError('')
+      setLoading(true)
+      setLoadingText('Loading real job listings...')
+      try {
+        const url = new URL('http://localhost:8000/api/jobs/real')
+        url.searchParams.set('limit', '200')
+        if (realJobsQuery.trim()) url.searchParams.set('q', realJobsQuery.trim())
+        const resp = await fetch(url.toString())
+        const data = await resp.json()
+        if (!data?.success) throw new Error('Failed to load jobs')
+        setRealJobs(Array.isArray(data.jobs) ? data.jobs : [])
+      } catch (e: any) {
+        console.error(e)
+        setRealJobs([])
+        setRealJobsError('Could not load real job listings. Is the backend running?')
+      } finally {
+        setLoading(false)
+        setLoadingText('')
+      }
+    }
+    void load()
+  }, [stage, realJobsReloadToken])
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -36,8 +102,64 @@ function JobSimulator() {
   }
 
   const handleJobSelect = (job: Job) => {
-    setApplicationData({ ...applicationData, selectedJob: job })
+    setJobSource('preset')
+    setApplicationData({ ...applicationData, selectedJob: { ...job, source: 'preset' } })
     setStage('resume-upload')
+  }
+
+  const handleRealJobSelect = (row: RealJobRow) => {
+    const selected: SelectedJob = {
+      id: `real-${encodeURIComponent(`${row.company}-${row.role}-${row.location}`)}`,
+      company: row.company,
+      role: row.role,
+      level: 'Internship',
+      type: 'intern',
+      // Placeholder; backend will infer and return effective difficulty during screening.
+      difficulty: 'easy',
+      description: `${row.category || 'Internship'}${row.age ? ` • ${row.age}` : ''}`,
+      location: row.location,
+      source: 'real',
+      real: row,
+    }
+    setJobSource('real')
+    setApplicationData({ selectedJob: selected, resume: null })
+    setStage('resume-upload')
+  }
+
+  const loadSelectedRealJobDetails = async () => {
+    const selected = applicationData.selectedJob
+    if (!selected || selected.source !== 'real' || !selected.real?.apply_url) return
+
+    setRealJobDetailsError('')
+    setRealJobDetailsLoading(true)
+    try {
+      const url = new URL('http://localhost:8000/api/jobs/real/details')
+      url.searchParams.set('apply_url', selected.real.apply_url)
+      url.searchParams.set('company', selected.company)
+      url.searchParams.set('role', selected.role)
+      const resp = await fetch(url.toString())
+      const data = await resp.json()
+      if (!data?.success) throw new Error(data?.error || 'Failed to load job details')
+
+      setApplicationData((prev) => {
+        if (!prev.selectedJob || prev.selectedJob.source !== 'real' || !prev.selectedJob.real) return prev
+        return {
+          ...prev,
+          selectedJob: {
+            ...prev.selectedJob,
+            real: {
+              ...prev.selectedJob.real,
+              details: data.details || {},
+            },
+          },
+        }
+      })
+    } catch (e: any) {
+      console.error(e)
+      setRealJobDetailsError('Could not load job description/requirements (posting may block scraping).')
+    } finally {
+      setRealJobDetailsLoading(false)
+    }
   }
 
   const handleStartSimulation = async () => {
@@ -47,12 +169,24 @@ function JobSimulator() {
     }
 
     setLoading(true)
+    setLoadingText('Screening your resume...')
     try {
       const formData = new FormData()
       formData.append('file', applicationData.resume)
       formData.append('difficulty', applicationData.selectedJob.difficulty)
       formData.append('role', applicationData.selectedJob.role)
       formData.append('level', applicationData.selectedJob.level)
+
+      if (applicationData.selectedJob.source === 'real') {
+        const r = applicationData.selectedJob.real
+        formData.append('job_source', 'real')
+        formData.append('company', applicationData.selectedJob.company)
+        if (r?.category) formData.append('job_category', r.category)
+        if (r?.location) formData.append('job_location', r.location)
+        if (r?.apply_url) formData.append('job_apply_url', r.apply_url)
+        if (r?.age) formData.append('job_age', r.age)
+        if (r?.raw?.row) formData.append('job_row', r.raw.row)
+      }
 
       const response = await fetch('http://localhost:8000/api/screen-resume', {
         method: 'POST',
@@ -61,12 +195,28 @@ function JobSimulator() {
 
       const data = await response.json()
       setScreeningResult(data)
+
+      // If backend inferred difficulty, persist it into the selected job
+      if (data?.difficulty && (data.difficulty === 'easy' || data.difficulty === 'medium' || data.difficulty === 'hard')) {
+        setApplicationData((prev) => {
+          if (!prev.selectedJob) return prev
+          return {
+            ...prev,
+            selectedJob: {
+              ...prev.selectedJob,
+              difficulty: data.difficulty,
+            } as SelectedJob,
+          }
+        })
+      }
+
       setStage('resume-screening')
     } catch (error) {
       console.error('Error:', error)
       alert('An error occurred during resume screening')
     } finally {
       setLoading(false)
+      setLoadingText('')
     }
   }
 
@@ -80,14 +230,15 @@ function JobSimulator() {
     }
   }
 
-  const handleBehavioralComplete = async (score: number) => {
+  const handleBehavioralComplete = async (score: number, meta?: { disqualified?: boolean; flags?: any; scoring_version?: string }) => {
     setBehavioralScore(score)
     
     // Calculate final decision
     const resumeScore = screeningResult?.passed ? 80 : 40
     const weightedScore = (resumeScore * 0.2) + (technicalScore * 0.5) + (score * 0.3)
     
-    const hired = weightedScore >= 65
+    const behavioralMinimum = 60
+    const hired = (weightedScore >= 65) && (score >= behavioralMinimum) && !meta?.disqualified
     
     setFinalResult({ hired, weightedScore, resumeScore, technicalScore, behavioralScore: score })
     setStage('result')
@@ -96,6 +247,116 @@ function JobSimulator() {
   const filteredJobs = selectedType === 'all'
     ? jobs
     : jobs.filter(job => job.difficulty === selectedType)
+
+  const renderSourceSelection = () => (
+    <div className="simulator-content">
+      <header className="simulator-header">
+        <h1>Choose Job Listings</h1>
+        <p className="simulator-subtitle">Use preset jobs or pull real internship listings.</p>
+      </header>
+
+      <div className="result-card" style={{ maxWidth: 820, margin: '0 auto' }}>
+        <h2 className="result-title" style={{ marginBottom: '0.5rem' }}>How do you want to pick jobs?</h2>
+        <p className="result-description" style={{ marginBottom: '1.5rem' }}>
+          Preset jobs are curated. Real jobs come from SimplifyJobs/Summer2026-Internships.
+        </p>
+
+        <div className="button-group" style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+          <button
+            className="primary-button"
+            onClick={() => {
+              setJobSource('preset')
+              setStage('job-selection')
+            }}
+          >
+            Use Preset Jobs
+          </button>
+          <button
+            className="secondary-button"
+            onClick={() => {
+              setJobSource('real')
+              setStage('real-job-selection')
+            }}
+          >
+            Use Real Job Listings
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+
+  const renderRealJobSelection = () => (
+    <div className="simulator-content">
+      <header className="simulator-header">
+        <h1>Real Job Listings</h1>
+        <p className="simulator-subtitle">
+          Powered by SimplifyJobs/Summer2026-Internships (shows all fields provided in the repo list).
+        </p>
+      </header>
+
+      <div className="result-card" style={{ marginBottom: '1.5rem' }}>
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <input
+            value={realJobsQuery}
+            onChange={(e) => setRealJobsQuery(e.target.value)}
+            placeholder="Search company, role, location..."
+            style={{
+              flex: 1,
+              minWidth: 260,
+              padding: '0.75rem 1rem',
+              borderRadius: 10,
+              border: '1px solid var(--border-color)',
+              background: 'var(--card-bg-solid)',
+              color: 'var(--text-primary)',
+            }}
+          />
+          <button
+            className="primary-button"
+            onClick={() => {
+              setRealJobsReloadToken((t) => t + 1)
+            }}
+          >
+            Search
+          </button>
+        </div>
+        {realJobsError && (
+          <div className="error-message" style={{ marginTop: '1rem' }}>{realJobsError}</div>
+        )}
+      </div>
+
+      <div className="jobs-grid">
+        {realJobs.map((row, idx) => (
+          <div
+            key={`${row.company}-${row.role}-${row.location}-${idx}`}
+            className="job-card"
+            onClick={() => handleRealJobSelect(row)}
+            style={{ cursor: 'pointer' }}
+          >
+            <div className="job-header">
+              <h3 className="job-company">{row.company}</h3>
+            </div>
+            <p className="job-role">{row.role}</p>
+            <p className="job-description">{row.category || 'Internship'}</p>
+            <p className="job-location">{row.location}{row.age ? ` • ${row.age}` : ''}</p>
+            {row.apply_url && (
+              <div style={{ marginTop: '0.5rem' }}>
+                <button
+                  type="button"
+                  className="job-apply-button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleRealJobSelect(row)
+                  }}
+                >
+                  View in simulator
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 
   const renderJobSelection = () => (
     <div className="simulator-content">
@@ -144,7 +405,6 @@ function JobSimulator() {
               <div className="job-header">
                 <h3 className="job-company">{job.company}</h3>
                 <div className="job-badges">
-                  <span className={`job-type-badge ${job.type}`}>{job.type}</span>
                   <span className={`job-difficulty-badge ${job.difficulty}`}>{job.difficulty}</span>
                 </div>
               </div>
@@ -176,6 +436,111 @@ function JobSimulator() {
             {applicationData.selectedJob?.type}
           </span>
         </div>
+
+        {applicationData.selectedJob?.source === 'real' && applicationData.selectedJob.real && (
+          <div style={{
+            marginTop: '1rem',
+            padding: '1rem',
+            borderRadius: 12,
+            border: '1px solid var(--border-color)',
+            background: 'var(--card-bg-solid)'
+          }}>
+            <h4 style={{ margin: 0, marginBottom: '0.5rem', color: 'var(--text-primary)' }}>Listing details</h4>
+            <p style={{ margin: 0, color: 'var(--text-secondary)' }}><strong>Category:</strong> {applicationData.selectedJob.real.category || '—'}</p>
+            <p style={{ margin: 0, color: 'var(--text-secondary)' }}><strong>Location:</strong> {applicationData.selectedJob.real.location || '—'}</p>
+            <p style={{ margin: 0, color: 'var(--text-secondary)' }}><strong>Age:</strong> {applicationData.selectedJob.real.age || '—'}</p>
+            {applicationData.selectedJob.real.apply_url && (
+              <div style={{ marginTop: '0.5rem' }}>
+                <button
+                  type="button"
+                  className="job-apply-button"
+                  onClick={() => {
+                    const url = applicationData.selectedJob?.real?.apply_url
+                    if (!url) return
+                    window.open(url, '_blank', 'noopener,noreferrer')
+                  }}
+                >
+                  Open original application
+                </button>
+              </div>
+            )}
+
+            {applicationData.selectedJob.real.apply_url && (
+              <div style={{ marginTop: '0.75rem' }}>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={loadSelectedRealJobDetails}
+                  disabled={realJobDetailsLoading}
+                  style={{ marginTop: 0 }}
+                >
+                  {realJobDetailsLoading ? 'Loading job details…' : 'Load job description & requirements'}
+                </button>
+                {realJobDetailsError && (
+                  <div className="error-message" style={{ marginTop: '0.5rem' }}>{realJobDetailsError}</div>
+                )}
+              </div>
+            )}
+
+            {applicationData.selectedJob.real.details && (
+              <div style={{ marginTop: '0.75rem' }}>
+                {applicationData.selectedJob.real.details.summary && (
+                  <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+                    <strong>Description:</strong> {applicationData.selectedJob.real.details.summary}
+                  </p>
+                )}
+
+                {(applicationData.selectedJob.real.details.requirements?.length ?? 0) > 0 && (
+                  <details style={{ marginTop: '0.75rem' }}>
+                    <summary style={{ cursor: 'pointer', color: 'var(--text-secondary)' }}>Requirements</summary>
+                    <ul style={{ marginTop: '0.5rem', color: 'var(--text-secondary)' }}>
+                      {(applicationData.selectedJob.real.details.requirements ?? []).map((r, i) => (
+                        <li key={`req-${i}`}>{r}</li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+
+                {(applicationData.selectedJob.real.details.qualifications?.length ?? 0) > 0 && (
+                  <details style={{ marginTop: '0.75rem' }}>
+                    <summary style={{ cursor: 'pointer', color: 'var(--text-secondary)' }}>Qualifications</summary>
+                    <ul style={{ marginTop: '0.5rem', color: 'var(--text-secondary)' }}>
+                      {(applicationData.selectedJob.real.details.qualifications ?? []).map((r, i) => (
+                        <li key={`qual-${i}`}>{r}</li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+
+                {(applicationData.selectedJob.real.details.responsibilities?.length ?? 0) > 0 && (
+                  <details style={{ marginTop: '0.75rem' }}>
+                    <summary style={{ cursor: 'pointer', color: 'var(--text-secondary)' }}>Responsibilities</summary>
+                    <ul style={{ marginTop: '0.5rem', color: 'var(--text-secondary)' }}>
+                      {(applicationData.selectedJob.real.details.responsibilities ?? []).map((r, i) => (
+                        <li key={`resp-${i}`}>{r}</li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </div>
+            )}
+            {applicationData.selectedJob.real.raw?.row && (
+              <details style={{ marginTop: '0.75rem' }}>
+                <summary style={{ cursor: 'pointer', color: 'var(--text-secondary)' }}>Raw source row</summary>
+                <pre style={{
+                  marginTop: '0.5rem',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  padding: '0.75rem',
+                  borderRadius: 10,
+                  border: '1px solid var(--border-color)',
+                  background: 'var(--bg-primary)',
+                  color: 'var(--text-secondary)'
+                }}>{applicationData.selectedJob.real.raw.row}</pre>
+              </details>
+            )}
+          </div>
+        )}
 
         <div className="resume-upload-section">
           <h2 className="section-title">Upload Your Resume</h2>
@@ -339,7 +704,8 @@ function JobSimulator() {
               )}
               <button
                 onClick={() => {
-                  setStage('job-selection')
+                  setStage('source-selection')
+                  setJobSource(null)
                   setScreeningResult(null)
                   setApplicationData({ selectedJob: null, resume: null })
                 }}
@@ -445,7 +811,8 @@ function JobSimulator() {
         )}
         <button
           onClick={() => {
-            setStage('job-selection')
+            setStage('source-selection')
+            setJobSource(null)
             setScreeningResult(null)
             setFinalResult(null)
             setTechnicalScore(0)
@@ -462,18 +829,32 @@ function JobSimulator() {
 
   return (
     <>
-      {loading && <LoadingScreen />}
+      {loading && <LoadingScreen text={loadingText || undefined} />}
       <div className="page">
         {stage !== 'technical' && (
           <div className="page-container">
             <button
               className="back-button"
-              onClick={() => stage === 'resume-upload' ? setStage('job-selection') : navigate('/')}
+              onClick={() => {
+                if (stage === 'resume-upload') {
+                  if (jobSource === 'real') setStage('real-job-selection')
+                  else setStage('job-selection')
+                  return
+                }
+                if (stage === 'job-selection' || stage === 'real-job-selection' || stage === 'source-selection') {
+                  navigate('/')
+                  return
+                }
+                // default fallback
+                navigate('/')
+              }}
             >
               ← {stage === 'resume-upload' ? 'Back to Jobs' : 'Back to Home'}
             </button>
 
+            {stage === 'source-selection' && renderSourceSelection()}
             {stage === 'job-selection' && renderJobSelection()}
+            {stage === 'real-job-selection' && renderRealJobSelection()}
             {stage === 'resume-upload' && renderResumeUpload()}
             {stage === 'resume-screening' && renderResumeScreening()}
             {stage === 'technical-passed' && renderTechnicalPassed()}
