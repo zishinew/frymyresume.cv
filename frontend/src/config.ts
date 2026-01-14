@@ -1,9 +1,10 @@
 // API Configuration
-// Update this URL after deploying your backend to production
-export const API_BASE_URL = import.meta.env.PROD 
-  ? 'https://ai-resume-critique-production.up.railway.app'
-  : 'http://localhost:8000'
+const isLocalDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
 
-export const WS_BASE_URL = import.meta.env.PROD
-  ? 'wss://ai-resume-critique-production.up.railway.app'
-  : 'ws://localhost:8000'
+export const API_BASE_URL = isLocalDev
+  ? 'http://localhost:8000'
+  : 'https://ai-resume-critique-production.up.railway.app'
+
+export const WS_BASE_URL = isLocalDev
+  ? 'ws://localhost:8000'
+  : 'wss://ai-resume-critique-production.up.railway.app'
