@@ -55,7 +55,6 @@ function JobSimulator() {
   })
   const [screeningResult, setScreeningResult] = useState<any>(null)
   const [technicalScore, setTechnicalScore] = useState<number>(0)
-  const [behavioralScore, setBehavioralScore] = useState<number>(0)
   const [finalResult, setFinalResult] = useState<any>(null)
   const [loading, setLoading] = useState(false)
   const [loadingText, setLoadingText] = useState<string>('')
@@ -231,8 +230,6 @@ function JobSimulator() {
   }
 
   const handleBehavioralComplete = async (score: number, meta?: { disqualified?: boolean; flags?: any; scoring_version?: string }) => {
-    setBehavioralScore(score)
-    
     // Calculate final decision
     const resumeScore = screeningResult?.passed ? 80 : 40
     const weightedScore = (resumeScore * 0.2) + (technicalScore * 0.5) + (score * 0.3)
@@ -455,9 +452,9 @@ function JobSimulator() {
                   type="button"
                   className="job-apply-button"
                   onClick={() => {
-                    const url = applicationData.selectedJob?.real?.apply_url
-                    if (!url) return
-                    window.open(url, '_blank', 'noopener,noreferrer')
+                    const job = applicationData.selectedJob
+                    if (!job || job.source !== 'real' || !job.real?.apply_url) return
+                    window.open(job.real.apply_url, '_blank', 'noopener,noreferrer')
                   }}
                 >
                   Open original application
@@ -816,7 +813,6 @@ function JobSimulator() {
             setScreeningResult(null)
             setFinalResult(null)
             setTechnicalScore(0)
-            setBehavioralScore(0)
             setApplicationData({ selectedJob: null, resume: null })
           }}
           className="primary-button"

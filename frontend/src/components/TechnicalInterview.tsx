@@ -723,10 +723,6 @@ public:
     }
   }
 
-  const toggleSolved = (questionId: string) => {
-    setSolved((prev) => ({ ...prev, [questionId]: !prev[questionId] }))
-  }
-
   const finishRound = () => {
     const ids = questionsRef.current.map((q) => q.id)
     const solvedCount = ids.filter((id) => solvedRef.current[id]).length

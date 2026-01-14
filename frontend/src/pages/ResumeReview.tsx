@@ -14,7 +14,6 @@ function ResumeReview() {
   const navigate = useNavigate()
   const [file, setFile] = useState<File | null>(null)
   const [jobRole, setJobRole] = useState('')
-  const [notes, setNotes] = useState('')
   const [loading, setLoading] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
   const [score, setScore] = useState<number | null>(null)
