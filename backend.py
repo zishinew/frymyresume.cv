@@ -23,24 +23,14 @@ app = FastAPI(title="AI Resume Critique API")
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "https://*.vercel.app",
-        "https://ai-resume-critique.vercel.app"
-    ],
+    allow_origins=["*"],  # Allow all origins for now - restrict later
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Add WebSocket origins explicitly
-ALLOWED_WS_ORIGINS = [
-    "http://localhost:3000",
-    "http://localhost:5173",
-    "https://*.vercel.app",
-    "https://ai-resume-critique.vercel.app"
-]
+ALLOWED_WS_ORIGINS = ["*"]  # Allow all for now
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
