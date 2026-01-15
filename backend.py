@@ -18,7 +18,7 @@ from typing import Optional, Any
 
 load_dotenv()
 
-app = FastAPI(title="AI Resume Critique API")
+app = FastAPI(title="FryMyResume API")
 
 # Configure CORS
 app.add_middleware(
@@ -2659,10 +2659,70 @@ async def generate_technical_problem(request: GenerateTechnicalProblemRequest):
         raise HTTPException(status_code=500, detail=f"Failed to generate problem: {str(e)}")
 
 
+def analyze_time_complexity_with_ai(code: str, question_title: str, question_description: str, language: str) -> dict:
+    """
+    Use AI to analyze if the solution has optimal time complexity.
+    Returns dict with 'is_optimal' (bool) and 'analysis' (str).
+    """
+    try:
+        client = genai.Client(api_key=GEMINI_API_KEY)
+
+        prompt = f"""You are an expert algorithms instructor. Analyze the time complexity of this {language} solution.
+
+Question: {question_title}
+Description: {question_description}
+
+Code:
+```{language}
+{code}
+```
+
+Determine if this solution uses the MOST EFFICIENT time complexity for this problem.
+
+Respond in this EXACT JSON format:
+{{
+  "is_optimal": true or false,
+  "actual_complexity": "O(...)",
+  "optimal_complexity": "O(...)",
+  "reasoning": "Brief explanation"
+}}
+
+Be strict - only mark as optimal if it uses the best known approach."""
+
+        response = call_gemini_with_retry(
+            client=client,
+            model="gemini-2.0-flash-exp",
+            contents=prompt,
+            max_retries=2,
+            initial_delay=1
+        )
+
+        # Parse JSON response
+        response_text = response.text if hasattr(response, 'text') else str(response)
+        result = _extract_first_json_object(response_text)
+
+        return {
+            "is_optimal": result.get("is_optimal", True),  # Default to optimal if parsing fails
+            "actual_complexity": result.get("actual_complexity", "Unknown"),
+            "optimal_complexity": result.get("optimal_complexity", "Unknown"),
+            "reasoning": result.get("reasoning", "")
+        }
+    except Exception as e:
+        print(f"Error analyzing time complexity with AI: {str(e)}")
+        # Fallback: assume optimal if AI fails
+        return {
+            "is_optimal": True,
+            "actual_complexity": "Unknown",
+            "optimal_complexity": "Unknown",
+            "reasoning": "AI analysis unavailable"
+        }
+
+
 def analyze_time_complexity(code: str, question_id: str, language: str) -> bool:
     """
     Analyze if the solution has optimal time complexity.
     Returns True if optimal, False otherwise.
+    This is a simple pattern-based fallback.
     """
     # Define optimal complexity patterns for common questions
     optimal_patterns = {
@@ -2679,24 +2739,24 @@ def analyze_time_complexity(code: str, question_id: str, language: str) -> bool:
         "top-k-frequent": ["heap", "counter", "bucket"],  # O(n) or O(n log k)
         "group-anagrams": ["sort.*join", "sorted", "counter"],  # O(n * k log k)
     }
-    
+
     # Suboptimal patterns that indicate inefficiency
     suboptimal_patterns = {
         "two-sum": ["for.*for", "nested.*loop"],  # O(n²) nested loops
-        "contains-duplicate": ["for.*for"],  # O(n²) nested loops  
+        "contains-duplicate": ["for.*for"],  # O(n²) nested loops
         "longest-consecutive": ["for.*for"],  # O(n²) without set
         "product-except-self": ["division", "/"],  # Using division (technically works but not the intended solution)
     }
-    
+
     code_lower = code.lower()
-    
+
     # Check for suboptimal patterns first
     if question_id in suboptimal_patterns:
         import re
         for pattern in suboptimal_patterns[question_id]:
             if re.search(pattern, code_lower):
                 return False
-    
+
     # Check for optimal patterns
     if question_id in optimal_patterns:
         for pattern in optimal_patterns[question_id]:
@@ -2704,7 +2764,7 @@ def analyze_time_complexity(code: str, question_id: str, language: str) -> bool:
             if re.search(pattern, code_lower):
                 return True
         return False  # No optimal pattern found
-    
+
     # For questions not in the list, assume optimal (no penalty)
     return True
 
@@ -2953,30 +3013,36 @@ async def run_code(request: RunCodeRequest):
             if passed:
                 passed_count += 1
 
-        # Calculate score
+        # Calculate base score from test cases
         score = (passed_count / total_tests) * 100 if total_tests > 0 else 0
         all_passed = passed_count == total_tests
 
-        # Analyze time complexity if submitted
-        complexity_penalty = 0
-        if request.run_mode == "submit":
-            optimal_complexity = analyze_time_complexity(request.code, question.get("id", ""), request.language)
-            if not optimal_complexity:
-                complexity_penalty = 20  # 20% penalty for non-optimal solution
-        
-        # Apply complexity penalty only if all tests passed
-        if all_passed and complexity_penalty > 0:
-            score = max(0, score - complexity_penalty)
+        # Analyze time complexity if submitted using AI
+        efficiency_analysis = None
+        is_efficient = True
+        if request.run_mode == "submit" and all_passed:
+            # Use AI to analyze time complexity
+            efficiency_analysis = analyze_time_complexity_with_ai(
+                request.code,
+                question.get("title", ""),
+                question.get("description", ""),
+                request.language
+            )
+            is_efficient = efficiency_analysis.get("is_optimal", True)
 
-        print(f"Final results: {passed_count}/{total_tests} passed, score={score}%, complexity_penalty={complexity_penalty}%")
+        print(f"Final results: {passed_count}/{total_tests} passed, score={score}%, is_efficient={is_efficient}")
         print(f"Test results array length: {len(test_results)}")
+        if efficiency_analysis:
+            print(f"Efficiency analysis: {efficiency_analysis}")
 
         return JSONResponse(content={
             "passed": all_passed,
             "score": round(score, 1),
             "passed_tests": passed_count,
             "total_tests": total_tests,
-            "test_results": test_results
+            "test_results": test_results,
+            "is_efficient": is_efficient,
+            "efficiency_analysis": efficiency_analysis
         })
     except HTTPException:
         raise
@@ -3762,16 +3828,16 @@ async def behavioral_interview_websocket(websocket: WebSocket):
         # System instruction for the interview
         system_instruction = f"""You are a professional behavioral interviewer at {company} conducting an interview for a {role} position.
 
-Your role:
-1. You will be given the exact question text to ask.
-2. Ask the question VERBATIM (no paraphrasing, no extra preamble).
-3. CRITICAL: Do NOT interrupt the candidate while they are speaking. Wait for long pauses (3+ seconds) before responding.
-4. Do NOT say filler words like "okay", "mm-hmm", "I see" while the candidate is speaking.
-5. Do NOT speak, acknowledge, or ask follow-ups unless you receive an explicit realtime text instruction.
-6. After the candidate answers, remain silent until instructed.
-7. After the final answer, deliver a brief closing remark ONLY when instructed.
+CRITICAL INSTRUCTIONS:
+1. When you receive a message, it will contain ONLY the interview question you should ask.
+2. Speak the question naturally and clearly, exactly as provided - do not add any preamble or extra words.
+3. Do NOT read out any meta-instructions or acknowledge them verbally - just ask the question provided.
+4. Do NOT interrupt the candidate while they are speaking. Wait for long pauses (3+ seconds).
+5. Do NOT use filler words like "okay", "mm-hmm", or "I see" during the candidate's response.
+6. After the candidate finishes their answer, remain completely silent unless you receive another message.
+7. Never ask follow-up questions unless explicitly instructed.
 
-Current question number: {interview_state['questions_asked'] + 1} of {interview_state['max_questions']}"""
+Remember: You only speak when given a new message. Each message contains exactly what you should say."""
 
         config = {
             # Note: Live API expects a single output modality. Requesting both
@@ -3873,16 +3939,12 @@ Current question number: {interview_state['questions_asked'] + 1} of {interview_
                     interview_state["questions_asked"] = max(interview_state["questions_asked"], question_number)
                     print(f"[WebSocket] Question {question_number} sent")
 
+                    # Send ONLY the question text - no meta-instructions
+                    # The system instruction already tells Gemini how to behave
                     if acknowledge_first:
-                        instruction = (
-                            "Acknowledge the candidate briefly (1-2 sentences), then ask the following question exactly as written, with no extra words: "
-                            + q_text
-                        )
+                        instruction = f"Thank you. {q_text}"
                     else:
-                        instruction = (
-                            "Ask the following question exactly as written, with no extra words: "
-                            + q_text
-                        )
+                        instruction = q_text
 
                     await session.send_realtime_input(text=instruction)
 
@@ -4143,11 +4205,12 @@ Current question number: {interview_state['questions_asked'] + 1} of {interview_
                                     next_q = interview_state["answers_completed"] + 1
                                     await _send_canonical_question(next_q, acknowledge_first=True)
                                 elif interview_state["answers_completed"] >= interview_state["max_questions"]:
-                                    # After the 3rd response, ask Gemini to close.
+                                    # After the 3rd response, send a closing statement
+                                    # Send ONLY what we want Gemini to say - no meta-instructions
                                     awaiting_close_turn_complete = True
                                     awaiting_question_turn_complete = False
                                     await session.send_realtime_input(
-                                        text="Thank the candidate, provide a brief closing remark, and end the interview."
+                                        text=f"Thank you for sharing your experiences with us today. We appreciate your time, and we'll be in touch soon regarding next steps."
                                     )
 
                     except WebSocketDisconnect:

@@ -1,6 +1,6 @@
-# AI Resume Critique - Frontend
+# FryMyResume - Frontend
 
-A modern React + TypeScript frontend for the AI Resume Critique application.
+A modern React + TypeScript frontend for the FryMyResume application.
 
 ## Features
 

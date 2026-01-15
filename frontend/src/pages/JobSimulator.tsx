@@ -9,7 +9,7 @@ import TechnicalInterview from '../components/TechnicalInterview'
 import BehavioralInterviewLive from '../components/BehavioralInterviewLive'
 import LoadingScreen from '../components/LoadingScreen'
 
-type Stage = 'intro' | 'source-selection' | 'job-selection' | 'real-job-selection' | 'resume-upload' | 'resume-screening' | 'technical' | 'technical-passed' | 'behavioral' | 'result'
+type Stage = 'intro' | 'source-selection' | 'job-selection' | 'real-job-selection' | 'resume-upload' | 'resume-screening' | 'technical' | 'technical-passed' | 'technical-failed' | 'behavioral' | 'result'
 
 type JobSource = 'preset' | 'real'
 
@@ -260,11 +260,18 @@ function JobSimulator() {
 
   const handleTechnicalComplete = (score: number) => {
     setTechnicalScore(score)
-    // Check if all questions passed (score === 100)
-    if (score === 100) {
-      setStage('technical-passed')
+
+    // Check if score meets 80% threshold to proceed to behavioral
+    if (score >= 80) {
+      // High achievers (100%) get special screen
+      if (score === 100) {
+        setStage('technical-passed')
+      } else {
+        setStage('behavioral')
+      }
     } else {
-      setStage('behavioral')
+      // Score below 80% - failed to advance
+      setStage('technical-failed')
     }
   }
 
@@ -727,6 +734,53 @@ function JobSimulator() {
     </div>
   )
 
+  const renderTechnicalFailed = () => (
+    <div className="simulator-content">
+      <div className="stage-indicator">
+        <div className="stage-dot completed"></div>
+        <div className="stage-line completed"></div>
+        <div className="stage-dot completed"></div>
+        <div className="stage-line"></div>
+        <div className="stage-dot"></div>
+      </div>
+
+      <header className="simulator-header">
+        <h1>Technical Round Complete</h1>
+        <p className="simulator-subtitle">
+          Score Below Threshold
+        </p>
+      </header>
+
+      <div className="result-card">
+        <div className="result-icon failure">✗</div>
+        <h2 className="result-title">Score Below 80% - Unable to Proceed</h2>
+        <p className="result-description">
+          You need to score at least 80% on the technical interview to advance to the behavioral round.
+          Your performance indicates that additional preparation may be needed.
+        </p>
+        <div className="score-display">
+          <span className="score-label">Technical Score:</span>
+          <span className="score-value">{technicalScore.toFixed(1)}%</span>
+        </div>
+        <div className="score-display" style={{ marginTop: '0.5rem', fontSize: '0.9rem', opacity: 0.7 }}>
+          <span>Minimum Required: 80%</span>
+        </div>
+        <button
+          onClick={() => {
+            setStage('source-selection')
+            setJobSource(null)
+            setScreeningResult(null)
+            setTechnicalScore(0)
+            setApplicationData({ selectedJob: null, resume: null })
+          }}
+          className="secondary-button"
+        >
+          Try Again
+        </button>
+      </div>
+    </div>
+  )
+
   const parseFeedback = (feedback: string) => {
     if (!feedback) return { keyPoints: [], improvementTips: [] }
     
@@ -1001,6 +1055,7 @@ function JobSimulator() {
             {stage === 'resume-upload' && renderResumeUpload()}
             {stage === 'resume-screening' && renderResumeScreening()}
             {stage === 'technical-passed' && renderTechnicalPassed()}
+            {stage === 'technical-failed' && renderTechnicalFailed()}
             {stage === 'behavioral' && renderBehavioral()}
             {stage === 'result' && renderResult()}
           </div>

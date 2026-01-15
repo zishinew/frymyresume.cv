@@ -25,6 +25,13 @@ interface GradeResult {
     passed: boolean
     error?: string | null
   }>
+  is_efficient?: boolean
+  efficiency_analysis?: {
+    is_optimal: boolean
+    actual_complexity: string
+    optimal_complexity: string
+    reasoning: string
+  }
 }
 
 type Language = 'python' | 'javascript' | 'java' | 'cpp' | 'c'
@@ -58,6 +65,7 @@ function TechnicalInterview({ company, role, difficulty, onComplete }: Technical
   const [gradeResultById, setGradeResultById] = useState<Record<string, GradeResult | null>>({})
   const [showSubmitModal, setShowSubmitModal] = useState(false)
   const [submitModalResult, setSubmitModalResult] = useState<GradeResult | null>(null)
+  const [aiAnalysisLoading, setAiAnalysisLoading] = useState(false)
 
   const editorRef = useRef<any>(null)
   const questionsRef = useRef<Question[]>([])
@@ -704,6 +712,11 @@ public:
       setGradingLoading(true)
       setGradingErrorById(prev => ({ ...prev, [q.id]: null }))
 
+      // Show AI analysis loading for submit mode
+      if (mode === 'submit') {
+        setAiAnalysisLoading(true)
+      }
+
       const currentCodeToRun = code[q.id]?.[selectedLanguage] || ''
       const response = await fetch(`${API_BASE_URL}/api/run-code`, {
         method: 'POST',
@@ -736,26 +749,49 @@ public:
       setGradingErrorById(prev => ({ ...prev, [q.id]: e?.message || 'Failed to grade' }))
     } finally {
       setGradingLoading(false)
+      setAiAnalysisLoading(false)
     }
   }
 
   const finishRound = () => {
     const ids = questionsRef.current.map((q) => q.id)
-    
-    // Calculate average score from all questions
-    let totalScore = 0
-    let questionsWithResults = 0
-    
+
+    // Calculate total test cases passed across all questions
+    let totalTestCasesPassed = 0
+    let totalTestCasesAcrossAllQuestions = 0
+    let inefficientCount = 0
+
     ids.forEach((id) => {
       const result = gradeResultByIdRef.current[id]
       if (result) {
-        totalScore += result.score
-        questionsWithResults++
+        totalTestCasesPassed += result.passed_tests
+        totalTestCasesAcrossAllQuestions += result.total_tests
+
+        // Check if this question was inefficient
+        if (result.is_efficient === false) {
+          inefficientCount++
+        }
       }
     })
-    
-    // Calculate final percentage (average of all question scores)
-    const finalScore = questionsWithResults > 0 ? totalScore / questionsWithResults : 0
+
+    // Calculate base score: (total test cases passed / total test cases) * 100
+    let baseScore = totalTestCasesAcrossAllQuestions > 0
+      ? (totalTestCasesPassed / totalTestCasesAcrossAllQuestions) * 100
+      : 0
+
+    // Apply penalty based on number of inefficient solutions
+    let penalty = 0
+    if (inefficientCount === 1) {
+      penalty = 20  // 20% penalty for one inefficient solution
+    } else if (inefficientCount >= 2) {
+      penalty = 30  // 30% penalty for both inefficient
+    }
+
+    // Final score = base score - penalty
+    const finalScore = Math.max(0, baseScore - penalty)
+
+    console.log(`Finish Round: ${totalTestCasesPassed}/${totalTestCasesAcrossAllQuestions} tests passed, inefficient count: ${inefficientCount}, base: ${baseScore}%, penalty: ${penalty}%, final: ${finalScore}%`)
+
     onComplete(finalScore)
   }
 
@@ -807,13 +843,37 @@ public:
 
   return (
     <div className="technical-interview leetcode-style">
+      {/* AI Analysis Loading Overlay */}
+      {aiAnalysisLoading && (
+        <div className="submit-success-overlay" style={{ backgroundColor: 'rgba(10, 10, 10, 0.95)' }}>
+          <div className="technical-loading-spinner" style={{ width: '60px', height: '60px' }} />
+          <h2 className="submit-success-message" style={{ marginTop: '1.5rem' }}>
+            Processing your answers...
+          </h2>
+          <p style={{ marginTop: '0.5rem', opacity: 0.7, fontSize: '0.9rem' }}>
+            AI is analyzing time complexity
+          </p>
+        </div>
+      )}
+
       {/* Submit Results Overlay */}
-      {showSubmitModal && submitModalResult && (
+      {showSubmitModal && submitModalResult && !aiAnalysisLoading && (
         <div className="submit-success-overlay">
           <div className="submit-success-checkmark">✓</div>
           <h2 className="submit-success-message">
             {submitModalResult.passed ? 'All test cases passed!' : 'Some test cases failed'}
           </h2>
+          <div style={{ marginTop: '1rem', fontSize: '1.5rem', fontWeight: 'bold' }}>
+            Score: {submitModalResult.score}%
+          </div>
+          {submitModalResult.efficiency_analysis && (
+            <div style={{ marginTop: '0.75rem', fontSize: '0.9rem', opacity: 0.85 }}>
+              {submitModalResult.is_efficient
+                ? '✓ Optimal time complexity'
+                : `⚠ Suboptimal (${submitModalResult.efficiency_analysis.actual_complexity} vs ${submitModalResult.efficiency_analysis.optimal_complexity})`
+              }
+            </div>
+          )}
         </div>
       )}
 

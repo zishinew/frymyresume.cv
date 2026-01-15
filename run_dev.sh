@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# Quick start script for AI Resume Critique
+# Quick start script for FryMyResume
 # This script starts both the backend and frontend servers
 
-echo "🚀 Starting AI Resume Critique Development Servers"
+echo "🚀 Starting FryMyResume Development Servers"
 echo ""
 
 # Check if .env file exists
