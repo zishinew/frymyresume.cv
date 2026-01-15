@@ -5,6 +5,27 @@
   position: relative;
 }
 
+/* Grid pattern background */
+.landing::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  opacity: 0.03;
+  background-image: 
+    linear-gradient(var(--text-primary) 1px, transparent 1px),
+    linear-gradient(90deg, var(--text-primary) 1px, transparent 1px);
+  background-size: 60px 60px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+[data-theme='light'] .landing::after {
+  opacity: 0.04;
+}
+
 /* Subtle animated gradient background */
 .landing::before {
   content: '';
@@ -18,6 +39,7 @@
               radial-gradient(circle at 80% 80%, var(--accent-light) 0%, transparent 50%);
   animation: gradientShift 15s ease infinite;
   pointer-events: none;
+  z-index: 0;
 }
 
 @keyframes gradientShift {

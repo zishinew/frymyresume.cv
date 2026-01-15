@@ -60,13 +60,15 @@ function JobSimulator() {
   const [loading, setLoading] = useState(false)
   const [loadingText, setLoadingText] = useState<string>('')
   const [selectedType, setSelectedType] = useState<'easy' | 'medium' | 'hard' | 'all'>('all')
+  const [jobDetailsRevealKey, setJobDetailsRevealKey] = useState<number>(0)
+  const [showSuccessOverlay, setShowSuccessOverlay] = useState(false)
+  const [showTechnicalIntro, setShowTechnicalIntro] = useState(false)
 
   const [realJobs, setRealJobs] = useState<RealJobRow[]>([])
   const [realJobsQuery, setRealJobsQuery] = useState<string>('')
   const [realJobsError, setRealJobsError] = useState<string>('')
   const [realJobsReloadToken, setRealJobsReloadToken] = useState<number>(0)
 
-  const [realJobDetailsLoading, setRealJobDetailsLoading] = useState<boolean>(false)
   const [realJobDetailsError, setRealJobDetailsError] = useState<string>('')
 
   const [presetTilt, setPresetTilt] = useState({ x: 0, y: 0 })
@@ -124,11 +126,18 @@ function JobSimulator() {
       id: `real-${encodeURIComponent(`${row.company}-${row.role}-${row.location}`)}`,
       company: row.company,
       role: row.role,
-      level: 'Internship',
+      level: 'Full-time',
       type: 'intern',
       // Placeholder; backend will infer and return effective difficulty during screening.
       difficulty: 'easy',
-      description: `${row.category || 'Internship'}${row.age ? ` • ${row.age}` : ''}`,
+      description: row.category
+        ? `${row.category}${row.age ? ` • ${row.age}` : ''}`
+        : `Job listing${row.age ? ` • ${row.age}` : ''}`,
+      details: {
+        about: '',
+        whatYoullDo: [],
+        minimumQualifications: [],
+      },
       location: row.location,
       source: 'real',
       real: row,
@@ -136,42 +145,51 @@ function JobSimulator() {
     setJobSource('real')
     setApplicationData({ selectedJob: selected, resume: null })
     setStage('resume-upload')
-  }
 
-  const loadSelectedRealJobDetails = async () => {
-    const selected = applicationData.selectedJob
-    if (!selected || selected.source !== 'real' || !selected.real?.apply_url) return
+    // Auto-load job description/requirements for real listings
+    void (async () => {
+      if (!row.apply_url) return
+      let shouldAnimateReveal = false
+      setRealJobDetailsError('')
+      setLoading(true)
+      setLoadingText('Loading job description…')
+      try {
+        const url = new URL(`${API_BASE_URL}/api/jobs/real/details`)
+        url.searchParams.set('apply_url', row.apply_url)
+        url.searchParams.set('company', row.company)
+        url.searchParams.set('role', row.role)
+        const resp = await fetch(url.toString())
+        const data = await resp.json()
+        if (!data?.success) throw new Error(data?.error || 'Failed to load job details')
 
-    setRealJobDetailsError('')
-    setRealJobDetailsLoading(true)
-    try {
-      const url = new URL(`${API_BASE_URL}/api/jobs/real/details`)
-      url.searchParams.set('apply_url', selected.real.apply_url)
-      url.searchParams.set('company', selected.company)
-      url.searchParams.set('role', selected.role)
-      const resp = await fetch(url.toString())
-      const data = await resp.json()
-      if (!data?.success) throw new Error(data?.error || 'Failed to load job details')
-
-      setApplicationData((prev) => {
-        if (!prev.selectedJob || prev.selectedJob.source !== 'real' || !prev.selectedJob.real) return prev
-        return {
-          ...prev,
-          selectedJob: {
-            ...prev.selectedJob,
-            real: {
-              ...prev.selectedJob.real,
-              details: data.details || {},
+        setApplicationData((prev) => {
+          if (!prev.selectedJob || prev.selectedJob.source !== 'real' || prev.selectedJob.id !== selected.id || !prev.selectedJob.real) return prev
+          return {
+            ...prev,
+            selectedJob: {
+              ...prev.selectedJob,
+              real: {
+                ...prev.selectedJob.real,
+                details: data.details || {},
+              },
             },
-          },
-        }
-      })
-    } catch (e: any) {
-      console.error(e)
-      setRealJobDetailsError('Could not load job description/requirements (posting may block scraping).')
-    } finally {
-      setRealJobDetailsLoading(false)
-    }
+          }
+        })
+
+        shouldAnimateReveal = true
+      } catch (e: any) {
+        console.error(e)
+        setRealJobDetailsError('Could not load job description/requirements (posting may block scraping).')
+
+        shouldAnimateReveal = true
+      } finally {
+        setLoading(false)
+        setLoadingText('')
+
+        // Trigger a keyed re-mount so the details content can animate
+        if (shouldAnimateReveal) setJobDetailsRevealKey((k) => k + 1)
+      }
+    })()
   }
 
   const handleStartSimulation = async () => {
@@ -223,6 +241,14 @@ function JobSimulator() {
       }
 
       setStage('resume-screening')
+      
+      // Show success overlay if passed
+      if (data?.passed) {
+        setShowSuccessOverlay(true)
+        setTimeout(() => {
+          setShowSuccessOverlay(false)
+        }, 2500)
+      }
     } catch (error) {
       console.error('Error:', error)
       alert('An error occurred during resume screening')
@@ -306,12 +332,12 @@ function JobSimulator() {
   }
 
   const renderSourceSelection = () => {
-
     return (
       <div className="source-selection-container">
         <button
           className="home-button"
           onClick={() => navigate('/')}
+          type="button"
         >
           ← Back to Home
         </button>
@@ -320,57 +346,56 @@ function JobSimulator() {
         <div className="split-screen">
           <div
             className="split-option preset-option"
+            onMouseMove={(e) => handleTiltMouseMove(e, setPresetTilt)}
+            onMouseLeave={() => handleTiltMouseLeave(setPresetTilt)}
             onClick={() => {
               setJobSource('preset')
               setStage('job-selection')
             }}
-            onMouseMove={(e) => handleTiltMouseMove(e, setPresetTilt)}
-            onMouseLeave={() => handleTiltMouseLeave(setPresetTilt)}
             style={{
-              transform: `perspective(1000px) rotateY(${presetTilt.x}deg) rotateX(${-presetTilt.y}deg)`,
+              transform: `perspective(900px) rotateX(${(-presetTilt.y).toFixed(2)}deg) rotateY(${presetTilt.x.toFixed(2)}deg)`,
             }}
+            role="button"
+            tabIndex={0}
           >
             <div className="split-content">
-              <div className="split-icon">
-                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-                  <circle cx="9" cy="7" r="4" />
-                  <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              <div className="split-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M7 7h10M7 11h10M7 15h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  <path d="M6 3h12a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3Z" stroke="currentColor" strokeWidth="2" />
                 </svg>
               </div>
-              <h2 className="split-title">Preset Jobs</h2>
-              <p className="split-description">
-                Curated positions across startups, mid-size companies, and big tech with varying difficulty levels
-              </p>
+              <div className="split-title">Preset Jobs</div>
+              <div className="split-description">Curated roles with realistic screening + interview simulations.</div>
             </div>
           </div>
 
-          <div className="split-divider"></div>
+          <div className="split-divider" />
 
           <div
             className="split-option real-option"
+            onMouseMove={(e) => handleTiltMouseMove(e, setRealTilt)}
+            onMouseLeave={() => handleTiltMouseLeave(setRealTilt)}
             onClick={() => {
               setJobSource('real')
               setStage('real-job-selection')
             }}
-            onMouseMove={(e) => handleTiltMouseMove(e, setRealTilt)}
-            onMouseLeave={() => handleTiltMouseLeave(setRealTilt)}
             style={{
-              transform: `perspective(1000px) rotateY(${realTilt.x}deg) rotateX(${-realTilt.y}deg)`,
+              transform: `perspective(900px) rotateX(${(-realTilt.y).toFixed(2)}deg) rotateY(${realTilt.x.toFixed(2)}deg)`,
             }}
+            role="button"
+            tabIndex={0}
           >
             <div className="split-content">
-              <div className="split-icon">
-                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="11" cy="11" r="8" />
-                  <path d="m21 21-4.35-4.35" />
+              <div className="split-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M20 20H4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  <path d="M6 20V9a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v11" stroke="currentColor" strokeWidth="2" />
+                  <path d="M9 7V5a3 3 0 0 1 6 0v2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                 </svg>
               </div>
-              <h2 className="split-title">Real Listings</h2>
-              <p className="split-description">
-                Live internship opportunities from Summer 2026 on SimplifyJobs with real application links
-              </p>
+              <div className="split-title">Real Listings</div>
+              <div className="split-description">Search real job postings and test your resume against them.</div>
             </div>
           </div>
         </div>
@@ -378,103 +403,28 @@ function JobSimulator() {
     )
   }
 
-  const renderRealJobSelection = () => (
-    <div className="simulator-content">
-      <header className="simulator-header job-selection-header">
-        <h1>Real Job Listings</h1>
-        
-      </header>
-
-      <div className="real-jobs-toolbar">
-        <div className="real-jobs-search">
-          <input
-            className="real-jobs-search-input"
-            value={realJobsQuery}
-            onChange={(e) => setRealJobsQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') setRealJobsReloadToken((t) => t + 1)
-            }}
-            placeholder="Search company, role, location..."
-          />
-          <button
-            type="button"
-            className="real-jobs-search-button"
-            onClick={() => {
-              setRealJobsReloadToken((t) => t + 1)
-            }}
-          >
-            Search
-          </button>
-        </div>
-        <div className="real-jobs-meta">
-          <span className="real-jobs-count">{realJobs.length} results</span>
-          <span className="real-jobs-hint">Tip: press Enter to search</span>
-        </div>
-
-        {realJobsError && (
-          <div className="error-message" style={{ marginTop: '1rem' }}>{realJobsError}</div>
-        )}
-      </div>
-
-      <div className="jobs-grid">
-        {realJobs.map((row, idx) => (
-          <div
-            key={`${row.company}-${row.role}-${row.location}-${idx}`}
-            className="job-card"
-            onClick={() => handleRealJobSelect(row)}
-            onMouseMove={handleCardGlowMouseMove}
-            style={{ cursor: 'pointer' }}
-          >
-            <div className="job-header">
-              <h3 className="job-company">{row.company}</h3>
-            </div>
-            <p className="job-role">{row.role}</p>
-            <p className="job-description">{row.category || 'Internship'}</p>
-            <p className="job-location">{row.location}{row.age ? ` • ${row.age}` : ''}</p>
-            {row.apply_url && (
-              <div style={{ marginTop: '0.5rem' }}>
-                <button
-                  type="button"
-                  className="job-apply-button"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    handleRealJobSelect(row)
-                  }}
-                >
-                  View in simulator
-                </button>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-
   const renderJobSelection = () => (
-    <div className="simulator-content">
+    <div className="simulator-content preset-job-selection">
       <header className="simulator-header job-selection-header">
-        <h1>Job Application Simulator</h1>
-        <p className="simulator-subtitle">
-          Select a position to apply for and experience the full interview process
-        </p>
+        <h1>Choose a Job</h1>
+        <p className="simulator-subtitle">Pick a role, then you'll see full details and upload your resume.</p>
       </header>
 
-      <div className="job-selection">
-        <div className="type-filter" role="tablist" aria-label="Job difficulty filters">
+      <div className="jobs-section">
+        <div className="type-filter">
           <button
             className={selectedType === 'all' ? 'filter-active' : ''}
             onClick={() => setSelectedType('all')}
             type="button"
           >
-            All Jobs
+            All
           </button>
           <button
             className={selectedType === 'easy' ? 'filter-active' : ''}
             onClick={() => setSelectedType('easy')}
             type="button"
           >
-            Easy (Startups)
+            Easy (Entry-level)
           </button>
           <button
             className={selectedType === 'medium' ? 'filter-active' : ''}
@@ -499,6 +449,8 @@ function JobSimulator() {
               className="job-card"
               onClick={() => handleJobSelect(job)}
               onMouseMove={handleCardGlowMouseMove}
+              role="button"
+              tabIndex={0}
             >
               <div className="job-header">
                 <h3 className="job-company">{job.company}</h3>
@@ -517,156 +469,221 @@ function JobSimulator() {
     </div>
   )
 
+  const renderRealJobSelection = () => (
+    <div className="simulator-content real-job-selection">
+      <header className="simulator-header job-selection-header">
+        <h1>Real Job Listings</h1>
+        <p className="simulator-subtitle">Search real listings, then view details and upload your resume.</p>
+      </header>
+
+      <div className="real-jobs-toolbar">
+        <div className="real-jobs-search">
+          <div className="real-jobs-searchbar">
+            <svg
+              className="real-jobs-search-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <circle cx="11" cy="11" r="7" />
+              <path d="M20 20l-3.5-3.5" />
+            </svg>
+            <input
+              className="real-jobs-search-input"
+              type="search"
+              value={realJobsQuery}
+              onChange={(e) => setRealJobsQuery(e.target.value)}
+              placeholder="Search role, company, or location…"
+              aria-label="Search real job listings"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') setRealJobsReloadToken((t) => t + 1)
+              }}
+            />
+          </div>
+        </div>
+        <div className="real-jobs-meta">
+          <div className="real-jobs-count">{realJobs.length} results</div>
+          <div className="real-jobs-hint">Tip: press Enter to search</div>
+        </div>
+      </div>
+
+      {realJobsError && <div className="error-message">{realJobsError}</div>}
+
+      <div className="jobs-grid">
+        {realJobs.map((row) => (
+          <div
+            key={`${row.company}-${row.role}-${row.location}-${row.apply_url ?? ''}`}
+            className="job-card"
+            onClick={() => handleRealJobSelect(row)}
+            onMouseMove={handleCardGlowMouseMove}
+            role="button"
+            tabIndex={0}
+          >
+            <div className="job-header">
+              <h3 className="job-company">{row.company}</h3>
+            </div>
+            <p className="job-role">{row.role}</p>
+            <p className="job-level">{row.category || 'Job listing'}</p>
+            <p className="job-description">{row.age ? `${row.age}` : 'Click to view details and apply'}</p>
+            <p className="job-location">{row.location}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+
   const renderResumeUpload = () => (
     <div className="simulator-content">
-      <header className="simulator-header">
+      <header className="simulator-header resume-upload-header">
         <h1>Upload Your Resume</h1>
         <p className="simulator-subtitle">
           You're applying for {applicationData.selectedJob?.role} at {applicationData.selectedJob?.company}
         </p>
       </header>
 
-      <div className="resume-upload-card">
-        <div className="selected-job-summary">
-          <h3>{applicationData.selectedJob?.company}</h3>
-          <p>{applicationData.selectedJob?.role}</p>
-          <span className={`job-type-badge ${applicationData.selectedJob?.type}`}>
-            {applicationData.selectedJob?.type}
-          </span>
-        </div>
+      <div className="resume-upload-layout">
+        <aside className="job-details-panel">
+          <div className="job-details-header">
+            <h2 className="job-details-role">{applicationData.selectedJob?.role}</h2>
+            <div className="job-details-company">{applicationData.selectedJob?.company}</div>
+            <div className="job-details-meta">
+              <span className="job-detail-pill">{applicationData.selectedJob?.location}</span>
+              <span className="job-detail-pill">{applicationData.selectedJob?.level}</span>
+              {applicationData.selectedJob?.source === 'preset' && applicationData.selectedJob?.difficulty && (
+                <span className={`job-difficulty-badge ${applicationData.selectedJob.difficulty}`}>{formatDifficulty(applicationData.selectedJob.difficulty)}</span>
+              )}
+            </div>
+          </div>
 
-        {applicationData.selectedJob?.source === 'real' && applicationData.selectedJob.real && (
-          <div style={{
-            marginTop: '1rem',
-            padding: '1rem',
-            borderRadius: 12,
-            border: '1px solid var(--border-color)',
-            background: 'var(--card-bg-solid)'
-          }}>
-            <h4 style={{ margin: 0, marginBottom: '0.5rem', color: 'var(--text-primary)' }}>Listing details</h4>
-            <p style={{ margin: 0, color: 'var(--text-secondary)' }}><strong>Category:</strong> {applicationData.selectedJob.real.category || '—'}</p>
-            <p style={{ margin: 0, color: 'var(--text-secondary)' }}><strong>Location:</strong> {applicationData.selectedJob.real.location || '—'}</p>
-            <p style={{ margin: 0, color: 'var(--text-secondary)' }}><strong>Age:</strong> {applicationData.selectedJob.real.age || '—'}</p>
-            {applicationData.selectedJob.real.apply_url && (
-              <div style={{ marginTop: '0.5rem' }}>
-                <button
-                  type="button"
-                  className="job-apply-button"
-                  onClick={() => {
-                    const job = applicationData.selectedJob
-                    if (!job || job.source !== 'real' || !job.real?.apply_url) return
-                    window.open(job.real.apply_url, '_blank', 'noopener,noreferrer')
-                  }}
-                >
-                  Open original application
-                </button>
-              </div>
+          {applicationData.selectedJob?.source === 'real' && applicationData.selectedJob.real?.apply_url && (
+            <div className="job-details-actions">
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => {
+                  const job = applicationData.selectedJob
+                  if (!job || job.source !== 'real' || !job.real?.apply_url) return
+                  window.open(job.real.apply_url, '_blank', 'noopener,noreferrer')
+                }}
+                style={{ marginTop: 0 }}
+              >
+                Apply on company site ↗
+              </button>
+            </div>
+          )}
+
+          <div
+            key={`job-details-${jobDetailsRevealKey}`}
+            className={applicationData.selectedJob?.source === 'real' ? 'job-details-content job-details-reveal' : 'job-details-content'}
+          >
+            <section className="job-details-section">
+              <h3 className="job-details-section-title">About the job</h3>
+              <p className="job-details-text">
+                {applicationData.selectedJob?.source === 'real'
+                  ? (applicationData.selectedJob.real?.details?.summary
+                    ? applicationData.selectedJob.real.details.summary
+                    : 'This is a real listing from SimplifyJobs. Job details may be unavailable for this posting.')
+                  : (applicationData.selectedJob?.details?.about || applicationData.selectedJob?.description)}
+              </p>
+            </section>
+
+            {applicationData.selectedJob?.source === 'preset' && (
+              <>
+                {(applicationData.selectedJob.details.whatYoullDo?.length ?? 0) > 0 && (
+                  <section className="job-details-section">
+                    <h3 className="job-details-section-title">What you'll be doing</h3>
+                    <ul className="job-details-list">
+                      {applicationData.selectedJob.details.whatYoullDo.slice(0, 12).map((item, i) => (
+                        <li key={`preset-do-${i}`}>{item}</li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
+
+                {(applicationData.selectedJob.details.minimumQualifications?.length ?? 0) > 0 && (
+                  <section className="job-details-section">
+                    <h3 className="job-details-section-title">Minimum qualifications</h3>
+                    <ul className="job-details-list">
+                      {applicationData.selectedJob.details.minimumQualifications.slice(0, 12).map((item, i) => (
+                        <li key={`preset-min-${i}`}>{item}</li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
+              </>
             )}
 
-            {applicationData.selectedJob.real.apply_url && (
-              <div style={{ marginTop: '0.75rem' }}>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={loadSelectedRealJobDetails}
-                  disabled={realJobDetailsLoading}
-                  style={{ marginTop: 0 }}
-                >
-                  {realJobDetailsLoading ? 'Loading job details…' : 'Load job description & requirements'}
-                </button>
+            {applicationData.selectedJob?.source === 'real' && applicationData.selectedJob.real && (
+              <>
                 {realJobDetailsError && (
-                  <div className="error-message" style={{ marginTop: '0.5rem' }}>{realJobDetailsError}</div>
-                )}
-              </div>
-            )}
-
-            {applicationData.selectedJob.real.details && (
-              <div style={{ marginTop: '0.75rem' }}>
-                {applicationData.selectedJob.real.details.summary && (
-                  <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
-                    <strong>Description:</strong> {applicationData.selectedJob.real.details.summary}
-                  </p>
+                  <div className="job-details-actions">
+                    <div className="error-message" style={{ marginTop: 0 }}>{realJobDetailsError}</div>
+                  </div>
                 )}
 
-                {(applicationData.selectedJob.real.details.requirements?.length ?? 0) > 0 && (
-                  <details style={{ marginTop: '0.75rem' }}>
-                    <summary style={{ cursor: 'pointer', color: 'var(--text-secondary)' }}>Requirements</summary>
-                    <ul style={{ marginTop: '0.5rem', color: 'var(--text-secondary)' }}>
-                      {(applicationData.selectedJob.real.details.requirements ?? []).map((r, i) => (
-                        <li key={`req-${i}`}>{r}</li>
-                      ))}
-                    </ul>
-                  </details>
-                )}
-
-                {(applicationData.selectedJob.real.details.qualifications?.length ?? 0) > 0 && (
-                  <details style={{ marginTop: '0.75rem' }}>
-                    <summary style={{ cursor: 'pointer', color: 'var(--text-secondary)' }}>Qualifications</summary>
-                    <ul style={{ marginTop: '0.5rem', color: 'var(--text-secondary)' }}>
-                      {(applicationData.selectedJob.real.details.qualifications ?? []).map((r, i) => (
-                        <li key={`qual-${i}`}>{r}</li>
-                      ))}
-                    </ul>
-                  </details>
-                )}
-
-                {(applicationData.selectedJob.real.details.responsibilities?.length ?? 0) > 0 && (
-                  <details style={{ marginTop: '0.75rem' }}>
-                    <summary style={{ cursor: 'pointer', color: 'var(--text-secondary)' }}>Responsibilities</summary>
-                    <ul style={{ marginTop: '0.5rem', color: 'var(--text-secondary)' }}>
-                      {(applicationData.selectedJob.real.details.responsibilities ?? []).map((r, i) => (
+                {(applicationData.selectedJob.real.details?.responsibilities?.length ?? 0) > 0 && (
+                  <section className="job-details-section">
+                    <h3 className="job-details-section-title">Responsibilities</h3>
+                    <ul className="job-details-list">
+                      {(applicationData.selectedJob.real.details?.responsibilities ?? []).slice(0, 12).map((r, i) => (
                         <li key={`resp-${i}`}>{r}</li>
                       ))}
                     </ul>
-                  </details>
+                  </section>
                 )}
+
+                {(applicationData.selectedJob.real.details?.requirements?.length ?? 0) > 0 && (
+                  <section className="job-details-section">
+                    <h3 className="job-details-section-title">Requirements</h3>
+                    <ul className="job-details-list">
+                      {(applicationData.selectedJob.real.details?.requirements ?? []).slice(0, 12).map((r, i) => (
+                        <li key={`req-${i}`}>{r}</li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
+              </>
+            )}
+          </div>
+        </aside>
+
+        <div className="resume-upload-panel">
+          <div className="resume-upload-card">
+            <div className="resume-upload-section">
+              <h2 className="section-title">Upload your resume</h2>
+              <p className="resume-hint">PDF or TXT • Used only for this simulation</p>
+              <div className="file-upload">
+                <label htmlFor="resume-input" className="file-label">
+                  <span className="file-icon">{applicationData.resume ? '✓' : '↑'}</span>
+                  <span className="file-text">
+                    {applicationData.resume ? applicationData.resume.name : 'Choose file (PDF or TXT)'}
+                  </span>
+                </label>
+                <input
+                  id="resume-input"
+                  type="file"
+                  accept=".pdf,.txt"
+                  onChange={handleFileChange}
+                  className="file-input"
+                />
               </div>
-            )}
-            {applicationData.selectedJob.real.raw?.row && (
-              <details style={{ marginTop: '0.75rem' }}>
-                <summary style={{ cursor: 'pointer', color: 'var(--text-secondary)' }}>Raw source row</summary>
-                <pre style={{
-                  marginTop: '0.5rem',
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                  padding: '0.75rem',
-                  borderRadius: 10,
-                  border: '1px solid var(--border-color)',
-                  background: 'var(--bg-primary)',
-                  color: 'var(--text-secondary)'
-                }}>{applicationData.selectedJob.real.raw.row}</pre>
-              </details>
-            )}
-          </div>
-        )}
+            </div>
 
-        <div className="resume-upload-section">
-          <h2 className="section-title">Upload Your Resume</h2>
-          <div className="file-upload">
-            <label htmlFor="resume-input" className="file-label">
-              <span className="file-icon">{applicationData.resume ? '✓' : '↑'}</span>
-              <span className="file-text">
-                {applicationData.resume ? applicationData.resume.name : 'Choose file (PDF or TXT)'}
-              </span>
-            </label>
-            <input
-              id="resume-input"
-              type="file"
-              accept=".pdf,.txt"
-              onChange={handleFileChange}
-              className="file-input"
-            />
+            <div className="button-group">
+              <button
+                onClick={handleStartSimulation}
+                disabled={loading || !applicationData.resume}
+                className="primary-button"
+              >
+                {loading ? 'Starting Simulation...' : 'Continue'}
+              </button>
+            </div>
           </div>
-        </div>
-
-        <div className="button-group">
-          <button
-            onClick={handleStartSimulation}
-            disabled={loading || !applicationData.resume}
-            className="primary-button"
-          >
-            {loading ? 'Starting Simulation...' : 'Apply Now!'}
-          </button>
         </div>
       </div>
     </div>
@@ -763,6 +780,13 @@ function JobSimulator() {
           </p>
         </header>
 
+        {showSuccessOverlay && screeningResult?.passed && (
+          <div className="success-overlay">
+            <div className="success-checkmark">✓</div>
+            <h2 className="success-message">You got the interview!</h2>
+          </div>
+        )}
+
         <div className="result-card">
           {screeningResult?.passed ? (
             <>
@@ -770,7 +794,15 @@ function JobSimulator() {
               <h2 className="result-title">Congratulations!</h2>
               <p className="result-description">You've been selected for the next round</p>
               <button
-                onClick={() => setStage('technical')}
+                onClick={() => {
+                  setShowTechnicalIntro(true)
+                  setTimeout(() => {
+                    setStage('technical')
+                  }, 100)
+                  setTimeout(() => {
+                    setShowTechnicalIntro(false)
+                  }, 3000)
+                }}
                 className="primary-button"
               >
                 Proceed to Technical Interview
@@ -927,6 +959,13 @@ function JobSimulator() {
   return (
     <>
       {loading && <LoadingScreen text={loadingText || undefined} />}
+      {showTechnicalIntro && (
+        <div className="technical-intro-overlay">
+          <div className="technical-intro-content">
+            <h1 className="technical-intro-title">Starting Technical Interview</h1>
+          </div>
+        </div>
+      )}
       <div className="page">
         {stage !== 'technical' && (
           <div className="page-container">

@@ -56,6 +56,8 @@ function TechnicalInterview({ company, role, difficulty, onComplete }: Technical
   const [gradingLoading, setGradingLoading] = useState(false)
   const [gradingErrorById, setGradingErrorById] = useState<Record<string, string | null>>({})
   const [gradeResultById, setGradeResultById] = useState<Record<string, GradeResult | null>>({})
+  const [showSubmitModal, setShowSubmitModal] = useState(false)
+  const [submitModalResult, setSubmitModalResult] = useState<GradeResult | null>(null)
 
   const editorRef = useRef<any>(null)
   const questionsRef = useRef<Question[]>([])
@@ -714,8 +716,16 @@ public:
       }
       setGradeResultById(prev => ({ ...prev, [q.id]: data }))
 
-      if (mode === 'submit' && data?.passed) {
-        setSolved(prev => ({ ...prev, [q.id]: true }))
+      if (mode === 'submit') {
+        // Show overlay for submit results
+        setSubmitModalResult(data)
+        setShowSubmitModal(true)
+        setTimeout(() => {
+          setShowSubmitModal(false)
+        }, 2500)
+        if (data?.passed) {
+          setSolved(prev => ({ ...prev, [q.id]: true }))
+        }
       }
     } catch (e: any) {
       setGradingErrorById(prev => ({ ...prev, [q.id]: e?.message || 'Failed to grade' }))
@@ -779,6 +789,16 @@ public:
 
   return (
     <div className="technical-interview leetcode-style">
+      {/* Submit Results Overlay */}
+      {showSubmitModal && submitModalResult && (
+        <div className="submit-success-overlay">
+          <div className="submit-success-checkmark">✓</div>
+          <h2 className="submit-success-message">
+            {submitModalResult.passed ? 'All test cases passed!' : 'Some test cases failed'}
+          </h2>
+        </div>
+      )}
+
       <div className="interview-header">
         <div className="timer">
           <span className="timer-icon">⏱</span>
@@ -793,9 +813,6 @@ public:
         <div className="question-panel">
           <div className="question-header">
             <h2 className="question-title">{currentQuestion.title}</h2>
-            <span className={`difficulty-badge ${currentQuestion.difficulty.toLowerCase()}`}>
-              {currentQuestion.difficulty}
-            </span>
           </div>
 
           <div className="question-description">
@@ -929,18 +946,6 @@ public:
 
           {(gradeError || gradeResult) && (
             <div className={`test-results ${gradeResult?.passed ? 'passed' : 'failed'}`}>
-              <div className="result-header">
-                <span className={`result-icon ${gradeResult?.passed ? 'success' : 'error'}`}>
-                  {gradeResult?.passed ? '✓' : '✕'}
-                </span>
-                <span className="result-text">
-                  {gradeError ? gradeError : gradeResult?.passed ? 'All tests passed' : 'Some tests failed'}
-                </span>
-                {gradeResult && (
-                  <span className="result-score-inline">Score: {gradeResult.score}%</span>
-                )}
-              </div>
-
               {gradeResult && (
                 <>
                   <div className="result-summary">

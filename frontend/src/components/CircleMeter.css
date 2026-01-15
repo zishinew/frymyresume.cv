@@ -8,15 +8,19 @@
 
 .circle-meter-svg {
   transform: rotate(-90deg);
-  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.1));
+  filter:
+    drop-shadow(0 18px 50px rgba(0, 0, 0, 0.55))
+    drop-shadow(0 8px 22px rgba(239, 68, 68, 0.10));
 }
 
 .circle-meter-background {
-  stroke: var(--border-color);
+  stroke: color-mix(in srgb, var(--border-color) 65%, transparent);
+  opacity: 0.9;
 }
 
 .circle-meter-progress {
-  transition: stroke 0.3s ease;
+  transition: stroke 0.3s ease, filter 0.3s ease;
+  filter: drop-shadow(0 0 18px rgba(239, 68, 68, 0.14));
 }
 
 .circle-meter-content {

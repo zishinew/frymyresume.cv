@@ -1004,50 +1004,48 @@ async def analyze_resume(
         - Competitive achievements (hackathons, case competitions with placements)
         - Academic excellence (high GPA, scholarships, awards)
 
-        STARTUP LEVEL (Maximum Score: 50-60):
+        SATURATED MARKET CALIBRATION:
+        - The market is saturated, so you must be strict.
+        - Still, do NOT artificially deflate scores: use the score bands below.
+        - 85+ should indicate FAANG-ready (or already FAANG-tier experience).
+        - If you are uncertain, score LOWER.
+
+        DECENT STUDENT (Typical Score: 60-65):
         - First or second year university student
-        - 1 current software role (e.g., FastAPI/React work at university club)
-        - 2-3 personal projects (NOTE: Heavily discounted - anyone can make these with AI now)
-        - Basic technical skills, maybe some certifications
-        - Some leadership/extracurriculars
-        - NO significant professional experience yet
-        REALISTIC OUTCOME: Can pass startup screening. Maybe a shot at banks if lucky and crushes technicals.
-        This candidate should score 50-60 MAXIMUM. They are NOT ready for anything beyond startups.
+        - Some relevant experience (club/dev team/research assistant) OR a small internship
+        - 1-3 projects that are coherent and shipped, but not clearly differentiated
+        - Some evidence of skills, but limited quantified impact
+        REALISTIC OUTCOME: Can land interviews at many companies, but not a standout.
 
-        INTERMEDIATE LEVEL (Score: 61-75):
-        - University student with HIGH GPA (3.7+) OR proven competitive success
-        - 1-2 REAL internships at established companies (not just university clubs)
-        - Example: 6-month+ internship at known company with measurable impact
-        - Strong academics + proven work experience + competitive achievements
-        - Projects are supplementary, NOT the main qualifier
-        - If low GPA, must have exceptional internships or competitive placements
-        This candidate should score 61-75. Can land mid-tier companies and banks.
+        NICE EXPERIENCES (Typical Score: 65-75):
+        - 1 real internship OR strong university team work with clear ownership
+        - Some quantifiable impact (metrics, scope, users, performance, cost, reliability)
+        - Projects show depth beyond tutorials (architecture, testing, deployment, real usage)
+        REALISTIC OUTCOME: Competitive for many mid-tier companies.
 
-        BIG TECH LEVEL (Score: 76-85):
-        - Multiple (2-3+) internships at KNOWN companies with real impact
-        - OR: 1 FAANG/unicorn internship with stellar performance
-        - High GPA (3.8+) from target school OR competitive programming success (ICPC, top Codeforces)
-        - Quantified impact at scale (worked on features with millions of users, measurable metrics)
-        - Projects are nice-to-have but NOT deciding factor
-        This candidate should score 76-85. Ready for Big Tech interviews.
+        STRONG (Typical Score: 75-85):
+        - Strong internship(s) with meaningful ownership and impact
+        - Projects are robust (tests, deployment, scalability, real users) and/or competitive achievements
+        - Clear evidence they can operate like a junior engineer (shipping, reliability, collaboration)
+        REALISTIC OUTCOME: Strong candidate; could be competitive for top-tier interviews.
 
-        EXCEPTIONAL (Score: 86-95):
-        - Multiple FAANG internships with return offers
-        - Significant open source contributions to major projects
-        - Top-tier competitive achievements (IOI medals, ICPC world finals)
-        - Founded successful startup or built product with real users
-        - Publications or research at top venues
-        This candidate should score 86-95. Top 1% of candidates.
+        FAANG READY (Score: 85+):
+        - FAANG/unicorn internship and/or already FAANG-level experience
+        - Or: rare signals (elite competitive programming, major OSS leadership, proven product traction)
+        - Multiple strong experiences with clear impact
+        REALISTIC OUTCOME: Genuinely ready for FAANG-level screens.
 
         SCORING GUIDELINES (BE STRICT):
-        - 86-95: Exceptional - Multiple FAANG internships, competitive achievements, or real business success
-        - 76-85: Big Tech Ready - 2+ quality internships OR 1 FAANG internship OR exceptional projects + competitive record
-        - 61-75: Intermediate - 1 real internship OR strong university dev role + excellent projects
-        - 51-60: Startup Level - University dev team role OR 2-3 solid projects, can pass startup screening
-        - 41-50: Below Bar - Only basic projects with no university dev experience
-        - 0-40: Not Ready - Major gaps, no meaningful technical work
+        - 85-92: FAANG Ready (rare)
+        - 75-84: Strong
+        - 65-74: Nice experiences
+        - 60-64: Decent student resume
+        - 45-59: Needs work
+        - 0-44: Major gaps
 
-        DO NOT INFLATE SCORES. Projects alone can get you 51-58 if they're strong enough.
+        DO NOT INFLATE SCORES.
+        - Assume projects may be AI-assisted unless there is clear evidence of depth (design decisions, scale, tests, perf work, deployment, users).
+        - A typical student resume with only projects should NOT be above ~60.
         University design teams, research positions, and dev clubs COUNT as real experience.
         """
 
@@ -1063,25 +1061,20 @@ async def analyze_resume(
         INSTRUCTIONS:
         1. Compare this resume to the REFERENCE resumes provided above
         2. Determine which level this resume can realistically achieve
-        3. Assign a PRECISE score from 1-100 based on these STRICT SCORING GUIDELINES:
-           - 0-25: No relevant experience, cannot pass any screening
-           - 26-40: Minimal qualifications, major improvements needed
-           - 41-50: Below startup bar, needs professional experience
-           - 51-58: Startup level - basic experience, can pass early-stage startup screening
-           - 59-65: Solid startup level - good for growth-stage startups
-           - 66-70: Low intermediate - might pass bank/mid-tier screening with luck
-           - 71-75: Intermediate ready - can land established companies
-           - 76-80: High intermediate - strong candidate for top mid-tier firms
-           - 81-85: Big tech ready - can compete for FAANG interviews
-           - 86-90: Strong big tech - likely to get multiple FAANG offers
-           - 91-95: Exceptional - top 1% candidate
-           - 96-100: Reserved for absolute legends only (IOI gold, multiple FAANG internships, etc.)
-        4. Be EXTREMELY STRICT and REALISTIC. Projects alone can be strong enough if they show real depth.
+          3. Assign a PRECISE score from 1-100 based on these STRICT SCORING GUIDELINES:
+              - 0-44: Major gaps
+              - 45-59: Needs work
+              - 60-64: Decent student resume
+              - 65-74: Nice experiences
+              - 75-84: Strong
+              - 85-92: FAANG ready (rare)
+              - 93-100: Reserved for extreme outliers only
+          4. Be EXTREMELY STRICT and REALISTIC for a saturated market.
         5. Focus on: professional experience, university dev team roles, project depth, competitive achievements, quantifiable impact.
         6. GPA is nice to have but NOT a major deciding factor - focus on actual technical work.
         7. University design teams, research positions, and dev clubs count as real experience.
-        8. A typical university student with only projects should score 48-56, NOT 65-75.
-        7. Provide a SPECIFIC numeric score (not rounded).
+        8. Default starting point is 55. Add points only for evidence; subtract for vagueness/buzzwords/no metrics.
+        9. Provide an INTEGER score (whole number).
 
         Respond in this EXACT format:
         SCORE: [number between 0-100]
@@ -1124,9 +1117,19 @@ async def analyze_resume(
         score = None
         score_match = re.search(r'SCORE:\s*(\d+)', response_text, re.IGNORECASE)
         if score_match:
-            score = int(score_match.group(1))
-            # Clamp score to 0-100
-            score = max(0, min(100, score))
+            raw_score = int(score_match.group(1))
+            raw_score = max(0, min(100, raw_score))
+
+            # Market calibration: gently reduce common inflation at the top end,
+            # but preserve the user's intended mid-range bands.
+            adjusted = raw_score
+            if raw_score >= 90:
+                adjusted -= 5
+            elif raw_score >= 85:
+                adjusted -= 3
+            elif raw_score >= 75:
+                adjusted -= 2
+            score = max(0, min(100, adjusted))
 
         return JSONResponse(content={
             "success": True,
@@ -1239,7 +1242,7 @@ LISTING:
                 University dev team roles (design teams, research labs, student dev clubs) COUNT as real experience.
                 Projects can compensate for lack of traditional internships IF they show real depth.
 
-                PASS if candidate has AT LEAST ONE of:
+                PASS if candidate has AT LEAST TWO of:
                 - Previous internship or co-op position
                 - Active role on university design team, research project, or dev club
                 - 2-3 strong projects with real technical depth (not basic CRUD apps)
@@ -1252,39 +1255,41 @@ LISTING:
                 - No evidence of technical growth or learning
 
                 GPA is nice to have but NOT a deciding factor.
-                Target pass rate: ~30-40% of applicants
+                Target pass rate: ~15-25% of applicants
                 """
             },
             "medium": {
                 "company_type": "a mid-tier company internship program",
                 "strictness": """
-                MID-TIER COMPANY INTERNSHIP HIRING MODE: Looking for proven performers with real technical depth.
+                MID-TIER COMPANY INTERNSHIP HIRING MODE: Looking for proven performers with real technical depth and clear evidence of impact.
 
-                CRITICAL: GPA is not a major factor. Focus on demonstrated technical ability through:
-                - Internships or professional work experience
-                - University dev team contributions (design teams, research labs)
-                - Strong project portfolio with depth and complexity
-                - Competitive programming success or hackathon victories
+                CRITICAL: GPA is not a major factor. What matters:
+                - REAL work experience (internships, research assistantships, dev team leadership)
+                - Quantifiable impact and ownership (not just "participated")
+                - Technical depth in projects (architecture, testing, deployment, real usage)
+                - Competitive validation (hackathons won, contributions merged, users acquired)
 
-                PASS if candidate has AT LEAST ONE of:
-                - 1+ previous internship at real company
-                - Active university dev team role (design team, research lab) + strong project portfolio (3+ complex projects)
-                - Significant competitive achievements + projects
-                - Freelance/contract work with real clients
+                PASS if candidate has AT LEAST ONE strong professional signal (internship/dev team leadership/research) AND AT LEAST TWO of:
+                - Previous internship at known company with clear responsibilities/impact
+                - University dev team leadership role (design team lead, research contributor with deliverables)
+                - Notable competitive achievements (hackathon wins/placements, not just participation)
+                - Strong OSS contributions (merged PRs with real impact, not typo fixes)
+                - Projects with real depth (tests, deployment, metrics, users) and clear ownership
 
                 REJECT if:
-                - No internship AND no university dev experience AND only basic projects
-                - Only tutorial-level projects with no depth
-                - No evidence of working on real technical challenges
+                - No previous internship/dev team experience AND only surface-level projects
+                - Projects lack depth (no tests, no deployment, no users, no clear architecture)
+                - Vague bullet points with no metrics or specific outcomes
+                - No evidence of working on complex technical problems or collaborating on real codebases
 
                 GPA is nice to have but NOT required if work/projects are strong.
-                Target pass rate: ~20-25% of applicants
+                Target pass rate: ~5-12% of applicants
                 """
             },
             "hard": {
-                "company_type": "a Big Tech company internship program",
+                "company_type": "a FAANG-tier / Big Tech company internship program",
                 "strictness": """
-                BIG TECH INTERNSHIP HIRING MODE: Only accepting top-tier candidates with exceptional proven track records.
+                FAANG-TIER INTERNSHIP HIRING MODE: Only accepting top-tier candidates with exceptional proven track records.
 
                 CRITICAL: GPA is nice to have but NOT required. What matters:
                 - Previous internships at top companies (FAANG, unicorns, elite startups)
@@ -1293,13 +1298,21 @@ LISTING:
                 - Founded company with real traction or worked on products with millions of users
                 - Exceptional project portfolio with measurable impact
 
-                PASS if candidate has AT LEAST TWO of:
-                - 1+ previous FAANG/unicorn internship
-                - Top 500 Codeforces, ICPC regional finalist, or similar competitive achievement
-                - Significant open source contributions (core contributor to major projects)
-                - Published research or won major hackathons (not just participation)
-                - Built product with 10k+ real users with metrics
-                - Multiple university dev team leadership roles + exceptional projects
+                NON-NEGOTIABLE GATE (must pass this gate, otherwise REJECT):
+                The resume MUST clearly show at least ONE of the following hard signals:
+                - A top-tier internship (FAANG/unicorn/very selective trading firm)
+                - Elite competitive programming (e.g., Codeforces Master+, ICPC strong placement, IOI/USACO top tiers)
+                - Major open-source impact (maintainer/core contributor, widely-used library, clear adoption)
+                - Research at a strong lab with publication(s) OR meaningful product traction (real users/metrics)
+
+                PASS only if the candidate clears the NON-NEGOTIABLE GATE AND has AT LEAST FOUR of:
+                - 1+ previous FAANG/unicorn/very selective internship (or a clear return offer)
+                - Strong competitive signal (Codeforces Master+/ICPC strong placement/IOI/USACO top tiers)
+                - Significant open-source impact (not small PRs; clear ownership/maintenance)
+                - Published research (credible venue) or serious engineering leadership (mentoring/leading major scope)
+                - Built product with real traction (e.g., 10k+ users OR clear revenue OR meaningful adoption)
+                - Multiple strong internships with quantified impact and scope
+                - Exceptional projects that show depth (tests, perf, systems design, deployment, scale)
 
                 REJECT if:
                 - No previous top-tier internship AND no exceptional technical achievements
@@ -1308,7 +1321,7 @@ LISTING:
                 - No measurable impact or scale
 
                 GPA is nice to have but NOT a deciding factor.
-                Target pass rate: ~10-15% of applicants
+                Target pass rate: ~1-3% of applicants
                 """
             }
         }
@@ -1328,23 +1341,21 @@ LISTING:
             This candidate should PASS a startup internship screening. Use this as your baseline.
             """,
             "medium": """
-            REFERENCE: This is an acceptable resume for a mid-tier company internship:
-            - University student with strong academics or bootcamp graduate
-            - 2+ substantial projects demonstrating technical skills
-            - Previous internship or freelance experience preferred
-            - Clear evidence of CS fundamentals understanding
+            REFERENCE: This is the MINIMUM acceptable resume for a mid-tier company internship:
+            - At least 1 real internship OR strong university dev team role with clear ownership
+            - Projects must show depth: testing, deployment, architecture decisions, or real users/metrics
+            - Clear evidence of technical competency beyond tutorials (frameworks, systems, collaboration)
+            - Quantified impact or scope in at least one experience
 
-            This candidate should PASS a mid-tier internship screening. Use this as your baseline.
+            This candidate should PASS a mid-tier company internship screening. Use this as your baseline.
             """,
             "hard": """
-            REFERENCE: This is an acceptable resume for a Big Tech internship:
-            - Strong university background or rigorous bootcamp
-            - 3+ significant projects with technical depth
-            - Previous internship at top company or strong GitHub presence
-            - Demonstrated algorithms/competitive programming skills
-            - Clear leadership or mentoring experience
+            REFERENCE: This is the MINIMUM acceptable resume for a FAANG-tier internship:
+            - At least ONE hard signal: FAANG/unicorn/selective internship OR elite competitive programming OR major OSS impact OR credible research/publication OR clear product traction
+            - Strong evidence of engineering depth (tests, deployment, scale, design decisions)
+            - Quantified impact (scope/metrics) in at least one experience
 
-            This candidate should PASS a Big Tech internship screening. Use this as your baseline.
+            This candidate should PASS a FAANG-tier internship screening. Use this as your baseline.
             """
         }
 
@@ -1383,7 +1394,8 @@ JOB POSTING TEXT (best-effort fetch; use this to judge requirements if present):
         INSTRUCTIONS:
         1. Compare this resume to the REFERENCE resume provided above
         2. The reference resume represents the MINIMUM bar for passing
-        3. If this resume is EQUAL TO or BETTER THAN the reference, you should PASS them
+        3. Be strict: the resume must be CLEARLY BETTER THAN the reference to PASS
+        3b. If this resume is only roughly EQUAL to the reference, REJECT
         4. If this resume is WEAKER than the reference, you should REJECT them
         4b. If JOB POSTING TEXT includes explicit requirements and the resume clearly misses critical requirements, REJECT.
         5. Make a BINARY decision: PASS or REJECT
@@ -1423,6 +1435,23 @@ JOB POSTING TEXT (best-effort fetch; use this to judge requirements if present):
 
         # Parse response to determine if passed
         passed = "DECISION: PASS" in response_text.upper()
+
+        # Deterministic guardrail for preset FAANG-tier jobs: if the resume does not appear
+        # to include any top-tier signals, force REJECT regardless of model generosity.
+        is_real_listing = (job_source or "").lower() in {"real", "simplifyjobs_summer2026", "simplifyjobs"}
+        if (not is_real_listing) and effective_difficulty == "hard":
+            gate_patterns = [
+                r"\b(google|alphabet|meta|facebook|amazon|aws|apple|microsoft|netflix|openai|anthropic|deepmind|nvidia|tesla|uber|airbnb|stripe|databricks|palantir|snowflake|coinbase|doordash|bloomberg|two\s+sigma|citadel|jane\s+street)\b",
+                r"\b(codeforces|icpc|ioi|usaco|acm\s+icpc|topcoder|kaggle\s+(master|grandmaster))\b",
+                r"\b(maintainer|core\s+contributor|tech\s+lead|team\s+lead)\b",
+                r"\b(\d{3,})\s*(stars|downloads)\b",
+                r"\b(10,?000\+?)\s*(users|customers)\b",
+                r"\b(publication|published|paper|arxiv)\b",
+            ]
+            hard_gate_met = any(re.search(p, text_content, re.IGNORECASE) for p in gate_patterns)
+            if not hard_gate_met:
+                passed = False
+                response_text = (response_text or "") + "\n\n[OVERRIDE] Preset FAANG-tier screening requires explicit top-tier signals (FAANG/unicorn/selective internship, elite competitive programming, major OSS impact, credible research/publications, or clear product traction). Not detected, so REJECT."
 
         return JSONResponse(content={
             "passed": passed,
@@ -1471,7 +1500,11 @@ TECHNICAL_QUESTIONS = {
                 {"input": {"nums": [0, 4, 3, 0], "target": 0}, "expectedOutput": [0, 3]},
                 {"input": {"nums": [1, 2], "target": 3}, "expectedOutput": [0, 1]},
                 {"input": {"nums": [10, 20, 30, 40, 50], "target": 90}, "expectedOutput": [3, 4]},
-                {"input": {"nums": [1, 3, 4, 2], "target": 6}, "expectedOutput": [2, 3]}
+                {"input": {"nums": [1, 3, 4, 2], "target": 6}, "expectedOutput": [2, 3]},
+                {"input": {"nums": [-5, -3, -1, 0, 2, 4], "target": -4}, "expectedOutput": [0, 2]},
+                {"input": {"nums": [100, 200, 300, 400], "target": 700}, "expectedOutput": [2, 3]},
+                {"input": {"nums": [15, 11, 7, 2], "target": 9}, "expectedOutput": [1, 3]},
+                {"input": {"nums": [3, 2, 4], "target": 6}, "expectedOutput": [1, 2]}
             ]
         },
         {
@@ -1498,7 +1531,11 @@ TECHNICAL_QUESTIONS = {
                 {"input": {"nums": [-1, -2, -3, -4]}, "expectedOutput": False},
                 {"input": {"nums": [-1, -2, -3, -1]}, "expectedOutput": True},
                 {"input": {"nums": [1000000000, -1000000000, 1000000000]}, "expectedOutput": True},
-                {"input": {"nums": [5, 4, 3, 2, 1]}, "expectedOutput": False}
+                {"input": {"nums": [5, 4, 3, 2, 1]}, "expectedOutput": False},
+                {"input": {"nums": [1, 2, 3, 4, 5, 6, 7, 8, 9, 1]}, "expectedOutput": True},
+                {"input": {"nums": [10, 11, 12, 13, 14, 15]}, "expectedOutput": False},
+                {"input": {"nums": [7, 7]}, "expectedOutput": True},
+                {"input": {"nums": [1, 5, 9, 13, 17, 21, 9]}, "expectedOutput": True}
             ]
         },
         {
@@ -1523,7 +1560,12 @@ TECHNICAL_QUESTIONS = {
                 {"input": {"s": "ab", "t": "ba"}, "expectedOutput": True},
                 {"input": {"s": "abc", "t": "ab"}, "expectedOutput": False},
                 {"input": {"s": "aaaaaaaaaa", "t": "aaaaaaaaaa"}, "expectedOutput": True},
-                {"input": {"s": "anagram", "t": "nagaram"}, "expectedOutput": True}
+                {"input": {"s": "anagram", "t": "nagaram"}, "expectedOutput": True},
+                {"input": {"s": "rat", "t": "car"}, "expectedOutput": False},
+                {"input": {"s": "listen", "t": "silent"}, "expectedOutput": True},
+                {"input": {"s": "hello", "t": "world"}, "expectedOutput": False},
+                {"input": {"s": "aabbcc", "t": "abcabc"}, "expectedOutput": True},
+                {"input": {"s": "abcd", "t": "dcba"}, "expectedOutput": True}
             ]
         },
         {
@@ -1551,7 +1593,14 @@ TECHNICAL_QUESTIONS = {
                 {"input": {"s": "A man, a plan, a canal: Panama"}, "expectedOutput": True},
                 {"input": {"s": "race a car"}, "expectedOutput": False},
                 {"input": {"s": "0P"}, "expectedOutput": False},
-                {"input": {"s": "   "}, "expectedOutput": True}
+                {"input": {"s": "   "}, "expectedOutput": True},
+                {"input": {"s": "a"}, "expectedOutput": True},
+                {"input": {"s": "ab"}, "expectedOutput": False},
+                {"input": {"s": "aba"}, "expectedOutput": True},
+                {"input": {"s": "Madam"}, "expectedOutput": True},
+                {"input": {"s": "No lemon, no melon"}, "expectedOutput": True},
+                {"input": {"s": "abc123cba"}, "expectedOutput": False},
+                {"input": {"s": ".,"}, "expectedOutput": True}
             ]
         },
         {
@@ -1579,7 +1628,14 @@ TECHNICAL_QUESTIONS = {
                 {"input": {"prices": [1, 2]}, "expectedOutput": 1},
                 {"input": {"prices": [3, 3, 3]}, "expectedOutput": 0},
                 {"input": {"prices": [2, 1, 2, 1, 0, 1, 2]}, "expectedOutput": 2},
-                {"input": {"prices": [1]}, "expectedOutput": 0}
+                {"input": {"prices": [1]}, "expectedOutput": 0},
+                {"input": {"prices": [7, 1, 5, 3, 6, 4]}, "expectedOutput": 5},
+                {"input": {"prices": [2, 4, 1]}, "expectedOutput": 2},
+                {"input": {"prices": [3, 2, 6, 5, 0, 3]}, "expectedOutput": 4},
+                {"input": {"prices": [1, 2, 3, 4, 5]}, "expectedOutput": 4},
+                {"input": {"prices": [5, 4, 3, 2, 1]}, "expectedOutput": 0},
+                {"input": {"prices": [100, 50, 75, 25, 100]}, "expectedOutput": 75},
+                {"input": {"prices": [10, 5, 15, 20]}, "expectedOutput": 15}
             ]
         },
         {
@@ -1605,7 +1661,13 @@ TECHNICAL_QUESTIONS = {
                 {"input": {"s": "([)]"}, "expectedOutput": False},
                 {"input": {"s": "((()))"}, "expectedOutput": True},
                 {"input": {"s": "())"}, "expectedOutput": False},
-                {"input": {"s": "((("}, "expectedOutput": False}
+                {"input": {"s": "((("}, "expectedOutput": False},
+                {"input": {"s": "()[]{}"}, "expectedOutput": True},
+                {"input": {"s": "{[()]}"}, "expectedOutput": True},
+                {"input": {"s": "([{}])"}, "expectedOutput": True},
+                {"input": {"s": "(]"}, "expectedOutput": False},
+                {"input": {"s": "{{{"}, "expectedOutput": False},
+                {"input": {"s": "(({{[[]]}})"}, "expectedOutput": False}
             ]
         },
         {
@@ -1627,7 +1689,16 @@ TECHNICAL_QUESTIONS = {
             ],
             "hiddenTestCases": [
                 {"input": {"head": [1]}, "expectedOutput": [1]},
-                {"input": {"head": [1, 2]}, "expectedOutput": [2, 1]}
+                {"input": {"head": [1, 2]}, "expectedOutput": [2, 1]},
+                {"input": {"head": [1, 2, 3]}, "expectedOutput": [3, 2, 1]},
+                {"input": {"head": [1, 2, 3, 4, 5]}, "expectedOutput": [5, 4, 3, 2, 1]},
+                {"input": {"head": [5, 4, 3, 2, 1]}, "expectedOutput": [1, 2, 3, 4, 5]},
+                {"input": {"head": [10, 20]}, "expectedOutput": [20, 10]},
+                {"input": {"head": [7]}, "expectedOutput": [7]},
+                {"input": {"head": [-1, -2, -3]}, "expectedOutput": [-3, -2, -1]},
+                {"input": {"head": [100, 200, 300, 400]}, "expectedOutput": [400, 300, 200, 100]},
+                {"input": {"head": [1, 1, 1, 1]}, "expectedOutput": [1, 1, 1, 1]},
+                {"input": {"head": [9, 8, 7, 6, 5, 4, 3, 2, 1]}, "expectedOutput": [1, 2, 3, 4, 5, 6, 7, 8, 9]}
             ]
         },
         {
@@ -1650,7 +1721,12 @@ TECHNICAL_QUESTIONS = {
             "hiddenTestCases": [
                 {"input": {"head": [1], "pos": -1}, "expectedOutput": False},
                 {"input": {"head": [1], "pos": 0}, "expectedOutput": True},
-                {"input": {"head": [1, 2, 3], "pos": 2}, "expectedOutput": True}
+                {"input": {"head": [1, 2, 3], "pos": 2}, "expectedOutput": True},
+                {"input": {"head": [1, 2, 3], "pos": 0}, "expectedOutput": True},
+                {"input": {"head": [1, 2, 3, 4, 5], "pos": 2}, "expectedOutput": True},
+                {"input": {"head": [1, 2, 3, 4], "pos": -1}, "expectedOutput": False},
+                {"input": {"head": [1, 2, 3, 4, 5, 6], "pos": 3}, "expectedOutput": True},
+                {"input": {"head": [10, 20, 30], "pos": -1}, "expectedOutput": False}
             ]
         }
     ],
@@ -1676,7 +1752,14 @@ TECHNICAL_QUESTIONS = {
                 {"input": {"nums": []}, "expectedOutput": 0},
                 {"input": {"nums": [100]}, "expectedOutput": 1},
                 {"input": {"nums": [1, 2, 0, 1]}, "expectedOutput": 3},
-                {"input": {"nums": [-1, -2, -3, 7, 8]}, "expectedOutput": 3}
+                {"input": {"nums": [-1, -2, -3, 7, 8]}, "expectedOutput": 3},
+                {"input": {"nums": [9, 1, 4, 7, 3, 2, 8, 5, 6]}, "expectedOutput": 9},
+                {"input": {"nums": [100, 4, 200, 1, 3, 2]}, "expectedOutput": 4},
+                {"input": {"nums": [0, -1, 1, 2, -2, -3]}, "expectedOutput": 6},
+                {"input": {"nums": [1, 1, 1, 1]}, "expectedOutput": 1},
+                {"input": {"nums": [10, 5, 12, 3, 55, 30, 4, 11, 2]}, "expectedOutput": 4},
+                {"input": {"nums": [-5, -4, -3, -2, -1]}, "expectedOutput": 5},
+                {"input": {"nums": [1000000000, 999999999, 1000000001]}, "expectedOutput": 3}
             ]
         },
         {
@@ -1701,7 +1784,15 @@ TECHNICAL_QUESTIONS = {
             "hiddenTestCases": [
                 {"input": {"nums": [-2, 0, 0, 2, 2]}, "expectedOutput": [[-2, 0, 2]]},
                 {"input": {"nums": [3, -2, 1, 0]}, "expectedOutput": []},
-                {"input": {"nums": [-4, -2, -2, -2, 0, 1, 2, 2, 2, 4]}, "expectedOutput": [[-4, 0, 4], [-4, 2, 2], [-2, -2, 4], [-2, 0, 2]]}
+                {"input": {"nums": [-4, -2, -2, -2, 0, 1, 2, 2, 2, 4]}, "expectedOutput": [[-4, 0, 4], [-4, 2, 2], [-2, -2, 4], [-2, 0, 2]]},
+                {"input": {"nums": [0, 0, 0, 0]}, "expectedOutput": [[0, 0, 0]]},
+                {"input": {"nums": [-4, -1, -1, 0, 1, 2]}, "expectedOutput": [[-1, -1, 2], [-1, 0, 1]]},
+                {"input": {"nums": [-2, 0, 1, 1, 2]}, "expectedOutput": [[-2, 0, 2], [-2, 1, 1]]},
+                {"input": {"nums": [1, -1, 0, 2, -2, 3]}, "expectedOutput": [[-2, -1, 3], [-2, 0, 2], [-1, 0, 1]]},
+                {"input": {"nums": [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5]}, "expectedOutput": [[-5, 0, 5], [-5, 1, 4], [-5, 2, 3], [-4, -1, 5], [-4, 0, 4], [-4, 1, 3], [-3, -2, 5], [-3, -1, 4], [-3, 0, 3], [-3, 1, 2], [-2, -1, 3], [-2, 0, 2], [-1, 0, 1]]},
+                {"input": {"nums": [3, 0, -2, -1, 1, 2]}, "expectedOutput": [[-2, -1, 3], [-2, 0, 2], [-1, 0, 1]]},
+                {"input": {"nums": [-1, 0, 1, 0]}, "expectedOutput": [[-1, 0, 1]]},
+                {"input": {"nums": [1, 1, -2]}, "expectedOutput": [[-2, 1, 1]]}
             ]
         },
         {
@@ -1724,7 +1815,15 @@ TECHNICAL_QUESTIONS = {
             "hiddenTestCases": [
                 {"input": {"heights": [1, 1]}, "expectedOutput": 1},
                 {"input": {"heights": [4, 3, 2, 1, 4]}, "expectedOutput": 16},
-                {"input": {"heights": [1, 2, 1]}, "expectedOutput": 2}
+                {"input": {"heights": [1, 2, 1]}, "expectedOutput": 2},
+                {"input": {"heights": [2, 3, 10, 5, 7, 8, 9]}, "expectedOutput": 36},
+                {"input": {"heights": [1, 8, 6, 2, 5, 4, 8, 3, 7]}, "expectedOutput": 49},
+                {"input": {"heights": [1, 1, 1, 1, 1]}, "expectedOutput": 4},
+                {"input": {"heights": [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]}, "expectedOutput": 25},
+                {"input": {"heights": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}, "expectedOutput": 25},
+                {"input": {"heights": [100, 1, 1, 1, 1, 1, 100]}, "expectedOutput": 600},
+                {"input": {"heights": [5, 2, 12, 1, 5, 3, 4, 11, 9, 4]}, "expectedOutput": 55},
+                {"input": {"heights": [1, 3, 2, 5, 25, 24, 5]}, "expectedOutput": 24}
             ]
         },
         {
@@ -1749,7 +1848,15 @@ TECHNICAL_QUESTIONS = {
             "hiddenTestCases": [
                 {"input": {"nums": [1]}, "expectedOutput": 1},
                 {"input": {"nums": [2, 1]}, "expectedOutput": 1},
-                {"input": {"nums": [5, 6, 7, 1, 2, 3, 4]}, "expectedOutput": 1}
+                {"input": {"nums": [5, 6, 7, 1, 2, 3, 4]}, "expectedOutput": 1},
+                {"input": {"nums": [11, 13, 15, 17]}, "expectedOutput": 11},
+                {"input": {"nums": [3, 1, 2]}, "expectedOutput": 1},
+                {"input": {"nums": [4, 5, 6, 7, 0, 1, 2]}, "expectedOutput": 0},
+                {"input": {"nums": [5, 1, 2, 3, 4]}, "expectedOutput": 1},
+                {"input": {"nums": [10, 20, 30, 40, 50, 1, 2, 3]}, "expectedOutput": 1},
+                {"input": {"nums": [2, 3, 4, 5, 1]}, "expectedOutput": 1},
+                {"input": {"nums": [100, 200, 300, 1, 10, 20]}, "expectedOutput": 1},
+                {"input": {"nums": [7, 8, 9, 10, 1, 2, 3, 4, 5, 6]}, "expectedOutput": 1}
             ]
         },
         {
@@ -1773,7 +1880,14 @@ TECHNICAL_QUESTIONS = {
                 {"input": {"head": [1]}, "expectedOutput": [1]},
                 {"input": {"head": [1, 2]}, "expectedOutput": [1, 2]},
                 {"input": {"head": [1, 2, 3]}, "expectedOutput": [1, 3, 2]},
-                {"input": {"head": [1, 2, 3, 4, 5, 6]}, "expectedOutput": [1, 6, 2, 5, 3, 4]}
+                {"input": {"head": [1, 2, 3, 4, 5, 6]}, "expectedOutput": [1, 6, 2, 5, 3, 4]},
+                {"input": {"head": [1, 2, 3, 4, 5, 6, 7]}, "expectedOutput": [1, 7, 2, 6, 3, 5, 4]},
+                {"input": {"head": [1, 2, 3, 4, 5, 6, 7, 8]}, "expectedOutput": [1, 8, 2, 7, 3, 6, 4, 5]},
+                {"input": {"head": [10, 20, 30, 40, 50]}, "expectedOutput": [10, 50, 20, 40, 30]},
+                {"input": {"head": [5, 4, 3, 2, 1]}, "expectedOutput": [5, 1, 4, 2, 3]},
+                {"input": {"head": [1, 2, 3, 4, 5, 6, 7, 8, 9]}, "expectedOutput": [1, 9, 2, 8, 3, 7, 4, 6, 5]},
+                {"input": {"head": [100, 200]}, "expectedOutput": [100, 200]},
+                {"input": {"head": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}, "expectedOutput": [1, 10, 2, 9, 3, 8, 4, 7, 5, 6]}
             ]
         },
         {
@@ -1805,7 +1919,15 @@ TECHNICAL_QUESTIONS = {
             "hiddenTestCases": [
                 {"input": {"strs": []}, "expectedOutput": []},
                 {"input": {"strs": ["ab", "ba", "abc", "bca", "cab"]}, "expectedOutput": [["ab", "ba"], ["abc", "bca", "cab"]]},
-                {"input": {"strs": ["aa", "aa", "a"]}, "expectedOutput": [["aa", "aa"], ["a"]]}
+                {"input": {"strs": ["aa", "aa", "a"]}, "expectedOutput": [["aa", "aa"], ["a"]]},
+                {"input": {"strs": ["abc", "bca", "cab", "xyz", "zyx", "yxz"]}, "expectedOutput": [["abc", "bca", "cab"], ["xyz", "zyx", "yxz"]]},
+                {"input": {"strs": ["listen", "silent", "enlist", "hello", "world"]}, "expectedOutput": [["listen", "silent", "enlist"], ["hello"], ["world"]]},
+                {"input": {"strs": ["a", "b", "c", "d"]}, "expectedOutput": [["a"], ["b"], ["c"], ["d"]]},
+                {"input": {"strs": ["aa", "aa", "aa"]}, "expectedOutput": [["aa", "aa", "aa"]]},
+                {"input": {"strs": ["dog", "god", "cat", "tac", "act"]}, "expectedOutput": [["dog", "god"], ["cat", "tac", "act"]]},
+                {"input": {"strs": ["race", "care", "acre", "moon", "noon"]}, "expectedOutput": [["race", "care", "acre"], ["moon"], ["noon"]]},
+                {"input": {"strs": ["stop", "pots", "tops", "spot", "opts"]}, "expectedOutput": [["stop", "pots", "tops", "spot", "opts"]]},
+                {"input": {"strs": ["debit card", "bad credit"]}, "expectedOutput": [["debit card"], ["bad credit"]]}
             ]
         },
         {
@@ -1830,7 +1952,15 @@ TECHNICAL_QUESTIONS = {
             "hiddenTestCases": [
                 {"input": {"nums": [1], "k": 1}, "expectedOutput": [1]},
                 {"input": {"nums": [4, 4, 4, 5, 5, 6], "k": 2}, "expectedOutput": [4, 5]},
-                {"input": {"nums": [-1, -1, -2, -2, -2, 3], "k": 2}, "expectedOutput": [-2, -1]}
+                {"input": {"nums": [-1, -1, -2, -2, -2, 3], "k": 2}, "expectedOutput": [-2, -1]},
+                {"input": {"nums": [1, 1, 1, 2, 2, 3], "k": 2}, "expectedOutput": [1, 2]},
+                {"input": {"nums": [5, 5, 5, 5, 1, 1, 1, 2, 2, 3], "k": 3}, "expectedOutput": [5, 1, 2]},
+                {"input": {"nums": [100, 100, 100, 200, 200, 300], "k": 1}, "expectedOutput": [100]},
+                {"input": {"nums": [7, 7, 8, 8, 9, 9], "k": 3}, "expectedOutput": [7, 8, 9]},
+                {"input": {"nums": [0, 0, 0, -1, -1, -2], "k": 2}, "expectedOutput": [0, -1]},
+                {"input": {"nums": [10, 10, 20, 20, 30, 30, 40], "k": 3}, "expectedOutput": [10, 20, 30]},
+                {"input": {"nums": [1, 2, 3, 4, 5, 5, 5, 5], "k": 1}, "expectedOutput": [5]},
+                {"input": {"nums": [3, 3, 3, 2, 2, 1], "k": 2}, "expectedOutput": [3, 2]}
             ]
         },
         {
@@ -1856,7 +1986,11 @@ TECHNICAL_QUESTIONS = {
                 {"input": {"x": 123}, "expectedOutput": False},
                 {"input": {"x": -101}, "expectedOutput": False},
                 {"input": {"x": 1000021}, "expectedOutput": False},
-                {"input": {"x": 9}, "expectedOutput": True}
+                {"input": {"x": 9}, "expectedOutput": True},
+                {"input": {"x": 1001}, "expectedOutput": True},
+                {"input": {"x": 12345}, "expectedOutput": False},
+                {"input": {"x": 99}, "expectedOutput": True},
+                {"input": {"x": 1234321}, "expectedOutput": True}
             ]
         }
     ],
@@ -1885,7 +2019,14 @@ TECHNICAL_QUESTIONS = {
                 {"input": {"s": "ADOBECODEBANC", "t": "ABC"}, "expectedOutput": "BANC"},
                 {"input": {"s": "aa", "t": "aa"}, "expectedOutput": "aa"},
                 {"input": {"s": "a", "t": "a"}, "expectedOutput": "a"},
-                {"input": {"s": "a", "t": "aa"}, "expectedOutput": ""}
+                {"input": {"s": "a", "t": "aa"}, "expectedOutput": ""},
+                {"input": {"s": "ab", "t": "b"}, "expectedOutput": "b"},
+                {"input": {"s": "abc", "t": "cba"}, "expectedOutput": "abc"},
+                {"input": {"s": "ADOBECODEBANCAAA", "t": "AAA"}, "expectedOutput": "AAA"},
+                {"input": {"s": "cabwefgewcwaefgcf", "t": "cae"}, "expectedOutput": "cwae"},
+                {"input": {"s": "bba", "t": "ab"}, "expectedOutput": "ba"},
+                {"input": {"s": "aaaaaaaaaaaabbbbbcdd", "t": "abcdd"}, "expectedOutput": "abbbbbcdd"},
+                {"input": {"s": "bdab", "t": "ab"}, "expectedOutput": "ab"}
             ]
         },
         {
@@ -1913,7 +2054,10 @@ TECHNICAL_QUESTIONS = {
                 {"input": {"s": "anviaj"}, "expectedOutput": 5},
                 {"input": {"s": "abcdefg"}, "expectedOutput": 7},
                 {"input": {"s": "tmmzuxt"}, "expectedOutput": 5},
-                {"input": {"s": "abba"}, "expectedOutput": 2}
+                {"input": {"s": "abba"}, "expectedOutput": 2},
+                {"input": {"s": "aab"}, "expectedOutput": 2},
+                {"input": {"s": "cdd"}, "expectedOutput": 2},
+                {"input": {"s": "abcabcbb"}, "expectedOutput": 3}
             ]
         },
         {
@@ -1939,7 +2083,12 @@ TECHNICAL_QUESTIONS = {
                 {"input": {"intervals": [[1,4],[0,1]]}, "expectedOutput": [[0,4]]},
                 {"input": {"intervals": [[1,4],[2,3]]}, "expectedOutput": [[1,4]]},
                 {"input": {"intervals": [[1,4],[0,0],[5,5]]}, "expectedOutput": [[0,0],[1,4],[5,5]]},
-                {"input": {"intervals": [[2,3],[4,5],[6,7],[8,9],[1,10]]}, "expectedOutput": [[1,10]]}
+                {"input": {"intervals": [[2,3],[4,5],[6,7],[8,9],[1,10]]}, "expectedOutput": [[1,10]]},
+                {"input": {"intervals": [[1,4],[0,2],[3,5]]}, "expectedOutput": [[0,5]]},
+                {"input": {"intervals": [[1,10],[2,3],[4,5],[6,7]]}, "expectedOutput": [[1,10]]},
+                {"input": {"intervals": [[1,2],[3,4],[5,6],[7,8]]}, "expectedOutput": [[1,2],[3,4],[5,6],[7,8]]},
+                {"input": {"intervals": [[0,0],[1,2],[5,5],[2,4],[3,3]]}, "expectedOutput": [[0,0],[1,4],[5,5]]},
+                {"input": {"intervals": [[2,6],[1,3],[8,10],[15,18]]}, "expectedOutput": [[1,6],[8,10],[15,18]]}
             ]
         },
         {
@@ -1965,7 +2114,15 @@ TECHNICAL_QUESTIONS = {
             "hiddenTestCases": [
                 {"input": {"lists": [[1], [0]]}, "expectedOutput": [0, 1]},
                 {"input": {"lists": [[-1, 5, 11], [6, 10]]}, "expectedOutput": [-1, 5, 6, 10, 11]},
-                {"input": {"lists": [[], [2], [], [1, 3]]}, "expectedOutput": [1, 2, 3]}
+                {"input": {"lists": [[], [2], [], [1, 3]]}, "expectedOutput": [1, 2, 3]},
+                {"input": {"lists": [[1, 4, 5], [1, 3, 4], [2, 6]]}, "expectedOutput": [1, 1, 2, 3, 4, 4, 5, 6]},
+                {"input": {"lists": [[-10, -9, -9, -3, -1], [-5]]}, "expectedOutput": [-10, -9, -9, -5, -3, -1]},
+                {"input": {"lists": [[1], [1], [1]]}, "expectedOutput": [1, 1, 1]},
+                {"input": {"lists": [[1, 2, 3], [4, 5, 6], [7, 8, 9]]}, "expectedOutput": [1, 2, 3, 4, 5, 6, 7, 8, 9]},
+                {"input": {"lists": [[-2, -1, 0], [1, 2, 3]]}, "expectedOutput": [-2, -1, 0, 1, 2, 3]},
+                {"input": {"lists": [[100, 200], [50, 150], [25, 75, 125]]}, "expectedOutput": [25, 50, 75, 100, 125, 150, 200]},
+                {"input": {"lists": [[5], [3], [1], [7], [9]]}, "expectedOutput": [1, 3, 5, 7, 9]},
+                {"input": {"lists": [[0, 1, 2], [0, 1, 2], [0, 1, 2]]}, "expectedOutput": [0, 0, 0, 1, 1, 1, 2, 2, 2]}
             ]
         }
     ]

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useId, useState, useEffect } from 'react'
 import './CircleMeter.css'
 
 interface CircleMeterProps {
@@ -7,6 +7,7 @@ interface CircleMeterProps {
 }
 
 function CircleMeter({ score, size = 240 }: CircleMeterProps) {
+  const gradientId = useId()
   const [animatedScore, setAnimatedScore] = useState(0)
   const radius = (size - 32) / 2
   const circumference = 2 * Math.PI * radius
@@ -33,25 +34,34 @@ function CircleMeter({ score, size = 240 }: CircleMeterProps) {
     return () => clearInterval(timer)
   }, [score])
 
-  const getColor = (score: number) => {
-    if (score >= 80) return '#22c55e' // green
-    if (score >= 60) return '#3b82f6' // blue
-    if (score >= 50) return '#f59e0b' // amber
-    if (score >= 40) return '#f97316' // orange
-    return '#ef4444' // red
+  const getAccentOpacity = (value: number) => {
+    // Keep the wheel on-theme (red), but subtly reflect strength.
+    if (value >= 85) return 1
+    if (value >= 70) return 0.92
+    if (value >= 55) return 0.84
+    if (value >= 40) return 0.76
+    return 0.68
   }
 
   const getLabel = (score: number) => {
-    if (score >= 80) return 'Big Tech Ready'
-    if (score >= 60) return 'Intermediate Level'
-    if (score >= 50) return 'Startup Level'
-    if (score >= 40) return 'Needs Improvement'
-    return 'Significant Work Needed'
+    if (score >= 85) return 'FAANG Ready'
+    if (score >= 75) return 'Strong Candidate'
+    if (score >= 65) return 'Competitive'
+    if (score >= 60) return 'Decent'
+    if (score >= 45) return 'Needs Work'
+    return 'Major Gaps'
   }
 
   return (
     <div className="circle-meter-container">
       <svg width={size} height={size} className="circle-meter-svg">
+        <defs>
+          <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="var(--accent-light, #ff6b6b)" stopOpacity={getAccentOpacity(score)} />
+            <stop offset="55%" stopColor="var(--accent, #ef4444)" stopOpacity={getAccentOpacity(score)} />
+            <stop offset="100%" stopColor="var(--accent-hover, #dc2626)" stopOpacity={getAccentOpacity(score)} />
+          </linearGradient>
+        </defs>
         <circle
           className="circle-meter-background"
           cx={size / 2}
@@ -67,7 +77,7 @@ function CircleMeter({ score, size = 240 }: CircleMeterProps) {
           r={radius}
           fill="none"
           strokeWidth="20"
-          stroke={getColor(animatedScore)}
+          stroke={`url(#${gradientId})`}
           strokeDasharray={circumference}
           strokeDashoffset={offset}
           strokeLinecap="round"
