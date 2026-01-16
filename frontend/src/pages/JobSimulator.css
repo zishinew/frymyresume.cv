@@ -2039,3 +2039,277 @@
 .stage-line.completed {
   background: #22c55e;
 }
+
+/* ============================================
+   RESPONSIVE DESIGN - MOBILE & TABLET
+   ============================================ */
+
+/* Tablet (portrait and landscape) */
+@media (max-width: 1024px) {
+  .page {
+    padding: 1.5rem;
+  }
+
+  .intro-title {
+    font-size: 2.5rem;
+  }
+
+  .intro-content {
+    padding: 2rem;
+  }
+
+  .simulator-content {
+    padding: 2rem 1.5rem;
+    max-width: 100%;
+  }
+
+  .simulator-header h1 {
+    font-size: 2rem;
+  }
+
+  .split-screen {
+    flex-direction: column;
+  }
+
+  .split-panel {
+    width: 100%;
+    min-height: 50vh;
+  }
+
+  .job-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+}
+
+/* Mobile (large phones) */
+@media (max-width: 768px) {
+  .page {
+    padding: 1rem;
+  }
+
+  .intro-title {
+    font-size: 2rem;
+  }
+
+  .intro-subtitle {
+    font-size: 1rem;
+  }
+
+  .intro-content {
+    padding: 1.5rem;
+  }
+
+  .home-button {
+    top: 1rem;
+    left: 1rem;
+    font-size: 0.875rem;
+  }
+
+  .simulator-content {
+    padding: 1.5rem 1rem;
+  }
+
+  .simulator-header h1 {
+    font-size: 1.75rem;
+  }
+
+  .simulator-subtitle {
+    font-size: 0.95rem;
+  }
+
+  .stage-indicator {
+    gap: 0.5rem;
+    margin-bottom: 2rem;
+  }
+
+  .stage-dot {
+    width: 10px;
+    height: 10px;
+  }
+
+  .stage-line {
+    width: 30px;
+  }
+
+  .split-panel {
+    min-height: 60vh;
+    padding: 2rem 1.5rem;
+  }
+
+  .split-title {
+    font-size: 2rem;
+  }
+
+  .split-description {
+    font-size: 0.95rem;
+  }
+
+  .job-card {
+    padding: 1.25rem;
+  }
+
+  .job-card h3 {
+    font-size: 1.1rem;
+  }
+
+  .job-card p {
+    font-size: 0.875rem;
+  }
+
+  .result-card {
+    padding: 2rem 1.5rem;
+  }
+
+  .result-title {
+    font-size: 1.25rem;
+  }
+
+  .result-description {
+    font-size: 0.95rem;
+  }
+
+  .score-display {
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 1rem;
+  }
+
+  .score-value {
+    font-size: 1.75rem;
+  }
+
+  .primary-button,
+  .secondary-button {
+    padding: 0.875rem 1.25rem;
+    font-size: 0.95rem;
+  }
+
+  .button-group {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .resume-upload-card {
+    padding: 2rem 1.5rem;
+  }
+
+  .file-label {
+    padding: 2rem 1.5rem;
+  }
+}
+
+/* Mobile (small phones) */
+@media (max-width: 480px) {
+  .page {
+    padding: 0.75rem;
+  }
+
+  .intro-title {
+    font-size: 1.75rem;
+  }
+
+  .intro-subtitle {
+    font-size: 0.95rem;
+  }
+
+  .intro-content {
+    padding: 1rem;
+  }
+
+  .home-button {
+    top: 0.75rem;
+    left: 0.75rem;
+    font-size: 0.8125rem;
+    padding: 0.375rem 0;
+  }
+
+  .simulator-content {
+    padding: 1rem 0.75rem;
+  }
+
+  .simulator-header h1 {
+    font-size: 1.5rem;
+  }
+
+  .simulator-subtitle {
+    font-size: 0.875rem;
+  }
+
+  .split-panel {
+    padding: 1.5rem 1rem;
+    min-height: 50vh;
+  }
+
+  .split-title {
+    font-size: 1.75rem;
+  }
+
+  .split-description {
+    font-size: 0.875rem;
+  }
+
+  .job-card {
+    padding: 1rem;
+  }
+
+  .job-card h3 {
+    font-size: 1rem;
+  }
+
+  .job-card p {
+    font-size: 0.8125rem;
+  }
+
+  .result-card {
+    padding: 1.5rem 1rem;
+  }
+
+  .result-icon {
+    font-size: 3rem;
+    width: 80px;
+    height: 80px;
+  }
+
+  .result-title {
+    font-size: 1.125rem;
+  }
+
+  .result-description {
+    font-size: 0.875rem;
+  }
+
+  .score-value {
+    font-size: 1.5rem;
+  }
+
+  .score-label {
+    font-size: 0.95rem;
+  }
+
+  .primary-button,
+  .secondary-button {
+    padding: 0.75rem 1rem;
+    font-size: 0.875rem;
+  }
+
+  .feedback-points {
+    padding: 1rem;
+  }
+
+  .feedback-list li {
+    font-size: 0.8125rem;
+  }
+
+  .resume-upload-card {
+    padding: 1.5rem 1rem;
+  }
+
+  .file-label {
+    padding: 1.5rem 1rem;
+  }
+
+  .file-icon {
+    font-size: 2.5rem;
+  }
+}

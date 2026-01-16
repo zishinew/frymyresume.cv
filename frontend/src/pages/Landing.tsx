@@ -162,15 +162,18 @@ function Landing() {
                 transition: 'transform 0.1s ease-out',
               }}
             >
-              <div className="video-placeholder">
-                <div className="play-button">
-                  <svg width="60" height="60" viewBox="0 0 60 60" fill="none">
-                    <circle cx="30" cy="30" r="30" fill="rgba(17, 17, 17, 0.8)" />
-                    <path d="M24 18L42 30L24 42V18Z" fill="white" />
-                  </svg>
-                </div>
-                <div className="placeholder-text">Demo Video Coming Soon</div>
-              </div>
+              <video
+                className="demo-video-element"
+                autoPlay
+                loop
+                muted
+                playsInline
+                preload="auto"
+              >
+                <source src="/demo.mov" type="video/quicktime" />
+                <source src="/demo.mov" type="video/mp4" />
+                Your browser does not support the video tag.
+              </video>
             </div>
 
             <div
