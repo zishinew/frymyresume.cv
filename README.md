@@ -1,43 +1,48 @@
-# OfferReady
+# frymyresume.cv
 
 [![Built with](https://img.shields.io/badge/Built_with-Google_Gemini-blue)](https://deepmind.google/technologies/gemini/)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/)
 [![React](https://img.shields.io/badge/React-18-blue)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue)](https://www.typescriptlang.org/)
 
-**Master your job search with AI-powered resume reviews and realistic interview simulations.**
+**AI-powered resume critique + a full internship interview pipeline (screening → technical → behavioral).**
 
-OfferReady is a comprehensive job preparation platform that helps you practice for real tech company interviews. Get instant feedback on your resume and experience the full application process from resume screening to behavioral interviews.
+frymyresume.cv helps you stress‑test your resume, simulate realistic internship hiring rounds, and practice live behavioral interviews with audio + speech‑to‑text.
 
-## ✨ Features
+## ✨ What’s New / Key Features
 
 ### Resume Review
-* **Professional Analysis:** AI-powered resume evaluation
-* **Role-Specific Feedback:** Tailored advice for your target position
-* **Actionable Improvements:** Specific recommendations to strengthen your resume
-* **File Support:** PDF and TXT formats accepted
+- **AI critique + score** with targeted, role‑specific feedback
+- **Actionable recommendations** grouped into clear sections
+- **PDF/TXT support** with client‑side file validation
 
-### Job Application Simulator
-* **Resume Screening:** Experience ruthlessly realistic screening by top tech companies
-* **Company-Specific Evaluation:** Difficulty adjusted based on company tier (FAANG vs others)
-* **Technical Interview:** (Coming soon) Coding challenges tailored to company standards
-* **Behavioral Interview:** (Coming soon) AI voice interview using ElevenLabs
-* **Full Pipeline:** Experience the complete hiring process from application to offer
+### Job Application Simulator (End‑to‑End)
+- **Preset jobs** (curated internship roles with difficulty tiers)
+- **Real internships** from SimplifyJobs (search + filter)
+- **Resume screening** calibrated by internship difficulty
+- **Auto‑inferred difficulty** for real listings (AI‑based)
 
-### Modern Tech Stack
-* **Clean UI:** Minimalist, modern design
-* **Fast API:** Efficient FastAPI backend
-* **Type-Safe:** Full TypeScript implementation
-* **Responsive:** Works on all devices
+### Real Job Details (Optional)
+- **Job posting summarization** (paraphrased) from apply links
+- **Requirements + responsibilities** extracted into structured bullets
+
+### Technical Interview
+- **Timed coding round** with Monaco editor
+- **Multiple languages**: Python, JavaScript, Java, C++, C
+- **Run vs submit** (sample vs hidden tests)
+- **Auto‑grading + efficiency checks** (with penalties for sub‑optimal solutions)
+
+### Live Behavioral Interview
+- **Real‑time WebSocket interview** using Gemini Live audio
+- **Speech‑to‑text** via Web Speech API (Chrome recommended)
+- **Scoring + disqualification guardrails** for unprofessional responses
 
 ---
 
 ## 🏗️ Architecture
 
-This application consists of two parts:
-
-1. **Backend**: FastAPI server that handles file uploads and AI analysis
-2. **Frontend**: React + TypeScript interface for user interaction
+1. **Backend**: FastAPI server for AI analysis, screening, grading, and job scraping
+2. **Frontend**: React + TypeScript single‑page app
 
 ---
 
@@ -45,127 +50,125 @@ This application consists of two parts:
 
 ### Prerequisites
 
-* **Python 3.10+**
-* **Node.js 18+** and npm
-* **Google Gemini API Key**:
-    1. Go to [Google AI Studio](https://aistudio.google.com/)
-    2. Create a new API key
-    3. Copy the key string
+- **Python 3.10+**
+- **Node.js 18+** and npm
+- **Google Gemini API Key** from [Google AI Studio](https://aistudio.google.com/)
 
-### Backend Setup
+### Environment Variables
 
-```bash
-# Navigate to the project directory
-cd Python/resume_critique
+Create a .env file in this folder:
 
-# Create a .env file and add your API key
-echo "GEMINI_API_KEY=your_api_key_here" > .env
-
-# Install Python dependencies (if using uv)
-uv add fastapi uvicorn python-multipart google-genai python-dotenv PyPDF2
-
-# Or with pip
-pip install fastapi uvicorn python-multipart google-genai python-dotenv PyPDF2
-
-# Run the backend server
-python backend.py
+```
+GEMINI_API_KEY=your_gemini_api_key_here
 ```
 
-The backend will start at `http://localhost:8000`
+Optional (legacy voice endpoint):
 
-### Frontend Setup
+```
+ELEVENLABS_API_KEY=your_elevenlabs_api_key_here
+```
+
+### Install Dependencies
 
 ```bash
-# Navigate to the frontend directory
+# Backend
+pip install -r requirements-backend.txt
+
+# Frontend
 cd frontend
-
-# Install dependencies
 npm install
-
-# Run the development server
-npm run dev
 ```
 
-The frontend will start at `http://localhost:5173`
+### Run Dev Servers
 
-### Running Both Services
+**Option A (one command):**
 
-You'll need two terminal windows:
-
-**Terminal 1 (Backend):**
 ```bash
-cd Python/resume_critique
+./run_dev.sh
+```
+
+**Option B (two terminals):**
+
+```bash
+# Terminal 1
 python backend.py
 ```
 
-**Terminal 2 (Frontend):**
 ```bash
-cd Python/resume_critique/frontend
+# Terminal 2
+cd frontend
 npm run dev
 ```
 
-Then open `http://localhost:5173` in your browser.
+Frontend: `http://localhost:5173`
+Backend: `http://localhost:8000`
+API Docs: `http://localhost:8000/docs`
 
 ---
 
-## 📁 Project Structure
+## 📁 Project Structure (High‑Level)
 
 ```
 resume_critique/
-├── backend.py          # FastAPI backend server
-├── main.py            # Original Streamlit app (legacy)
-├── .env               # Environment variables (API keys)
-├── requirements.txt   # Python dependencies
-└── frontend/          # React + TypeScript frontend
-    ├── src/
-    │   ├── App.tsx    # Main application component
-    │   ├── App.css    # Component styles
-    │   └── index.css  # Global styles
-    ├── package.json
-    └── README.md
+├── backend.py
+├── run_dev.sh
+├── requirements-backend.txt
+├── data/
+├── frontend/
+│   ├── src/
+│   │   ├── pages/        # Landing, ResumeReview, JobSimulator
+│   │   ├── components/   # Technical + Behavioral interviews
+│   │   └── lib/          # Speech-to-text helpers
+│   └── public/
+└── vercel.json
 ```
 
 ---
 
-## 🚀 Deployment
+## 🛠️ API Surface (Backend)
 
-### Backend Deployment
+### Resume
+- `POST /api/analyze` — Resume critique + score
 
-The FastAPI backend can be deployed to platforms like:
-- Railway
-- Render
-- Heroku
-- AWS/GCP/Azure
+### Job Simulator
+- `POST /api/screen-resume` — Resume screening
+- `GET /api/jobs/real` — Real internship listings (SimplifyJobs)
+- `GET /api/jobs/real/details` — Summarized job details
 
-### Frontend Deployment
+### Technical Interview
+- `POST /api/technical-questions` — Get interview questions
+- `POST /api/run-code` — Run/submit solution against tests
+- `POST /api/technical/problem` — Generate original problem prompt + tests
+- `POST /api/technical/grade` — Grade against generated session
 
-The React frontend can be deployed to:
-- Vercel
-- Netlify
-- GitHub Pages
+### Behavioral Interview
+- `WS /ws/behavioral-interview` — Live voice interview (Gemini Live)
 
-Make sure to update the API endpoint in [App.tsx](frontend/src/App.tsx) from `http://localhost:8000` to your production backend URL.
+### Legacy Voice Endpoints
+- `POST /api/start-voice-interview`
+- `POST /api/voice-response`
 
 ---
 
-## 🛠️ API Documentation
+## 🚀 Deployment Notes
 
-Once the backend is running, visit `http://localhost:8000/docs` to see the interactive API documentation.
+- **Backend**: Railway / Render / Fly.io / Docker
+- **Frontend**: Vercel / Netlify
+- Update API endpoints in `frontend/src/config.ts` for production.
+- Lock down CORS origins in `backend.py` when deploying.
 
-### Endpoints
+---
 
-- `GET /` - Health check
-- `POST /api/analyze` - Analyze resume
-  - Parameters:
-    - `file`: Resume file (PDF or TXT)
-    - `job_role`: Target job role (optional)
-    - `notes`: Additional notes (optional)
+## ⚠️ Notes & Limitations
+
+- **Behavioral interview** works best in Chrome (Web Speech API).
+- Some **real job postings** block scraping; those details may be unavailable.
 
 ---
 
 ## 🧪 Legacy Streamlit Version
 
-The original Streamlit version is still available in [main.py](main.py). To run it:
+The original Streamlit app is still available in `main.py`:
 
 ```bash
 streamlit run main.py
