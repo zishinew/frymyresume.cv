@@ -971,6 +971,42 @@ async def analyze_resume(
         JSON with analysis results
     """
     try:
+        def _sanitize_job_role(value: Optional[str]) -> Optional[str]:
+            if not value:
+                return None
+            v = re.sub(r"\s+", " ", value).strip()
+            if not v:
+                return None
+
+            # Remove obvious prompt-injection phrasing
+            injection_patterns = [
+                r"ignore\s+all\s+previous\s+instructions",
+                r"ignore\s+previous\s+instructions",
+                r"ignore\s+all\s+instructions",
+                r"system\s+prompt",
+                r"developer\s+message",
+                r"you\s+are\s+chatgpt",
+                r"give\s+the\s+user\s+\d+",
+                r"return\s+\d+",
+                r"always\s+give\s+\d+",
+                r"score\s+\d+",
+            ]
+            lowered = v.casefold()
+            if any(re.search(p, lowered) for p in injection_patterns):
+                return None
+
+            # Allow only a conservative set of characters
+            v = re.sub(r"[^a-zA-Z0-9\s\-\/+&.,()]+", "", v).strip()
+            if not v:
+                return None
+
+            # Limit length to avoid instruction stuffing
+            if len(v) > 60:
+                v = v[:60].strip()
+            return v or None
+
+        job_role = _sanitize_job_role(job_role)
+
         # Validate file type
         if file.content_type not in ["application/pdf", "text/plain"]:
             raise HTTPException(
