@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { API_BASE_URL } from '../config'
 import './JobSimulator.css'
 import { jobs } from '../data/jobs'
@@ -48,6 +48,7 @@ interface ApplicationData {
 
 function JobSimulator() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [stage, setStage] = useState<Stage>('intro')
   const [jobSource, setJobSource] = useState<JobSource | null>(null)
   const [applicationData, setApplicationData] = useState<ApplicationData>({
@@ -82,6 +83,36 @@ function JobSimulator() {
       return () => clearTimeout(timer)
     }
   }, [stage])
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const requestedStage = params.get('stage') || params.get('test')
+    if (requestedStage !== 'behavioral') return
+
+    const company = params.get('company') || 'Test Company'
+    const role = params.get('role') || 'Software Engineering Intern'
+
+    setApplicationData({
+      selectedJob: {
+        id: 'behavioral-test',
+        company,
+        role,
+        level: 'Intern',
+        type: 'intern',
+        difficulty: 'easy',
+        description: 'Temporary behavioral interview test session',
+        details: {
+          about: '',
+          whatYoullDo: [],
+          minimumQualifications: [],
+        },
+        location: 'Remote',
+        source: 'preset',
+      },
+      resume: null,
+    })
+    setStage('behavioral')
+  }, [location.search])
 
   useEffect(() => {
     const load = async () => {
@@ -275,6 +306,57 @@ function JobSimulator() {
     }
   }
 
+  const buildBehavioralFeedback = (score: number, meta?: { disqualified?: boolean; flags?: any; scoring_version?: string }) => {
+    if (meta?.disqualified) {
+      return {
+        summary: 'Your behavioral interview response included content that would disqualify a candidate in a real interview.',
+        tips: [
+          'Keep responses professional and workplace-appropriate.',
+          'Avoid hostile, threatening, or illegal statements.',
+          'Use a calm, constructive tone when discussing challenges or conflicts.'
+        ]
+      }
+    }
+
+    if (score >= 85) {
+      return {
+        summary: 'Excellent behavioral performance with clear, structured answers and strong impact.',
+        tips: [
+          'Keep highlighting measurable results.',
+          'Maintain concise STAR structure (Situation, Task, Action, Result).'
+        ]
+      }
+    }
+
+    if (score >= 70) {
+      return {
+        summary: 'Solid behavioral answers with good clarity and relevance.',
+        tips: [
+          'Make your actions more explicit and detailed.',
+          'Quantify outcomes where possible.'
+        ]
+      }
+    }
+
+    if (score >= 60) {
+      return {
+        summary: 'Decent effort, but responses need more structure and specificity.',
+        tips: [
+          'Use the STAR format to organize each answer.',
+          'Include concrete examples instead of general statements.'
+        ]
+      }
+    }
+
+    return {
+      summary: 'Behavioral responses were unclear or lacked concrete examples.',
+      tips: [
+        'Prepare 3–4 strong stories in advance (teamwork, conflict, leadership, challenge).',
+        'Focus on what you personally did and the outcome.'
+      ]
+    }
+  }
+
   const handleBehavioralComplete = async (score: number, meta?: { disqualified?: boolean; flags?: any; scoring_version?: string }) => {
     // Calculate final decision
     const resumeScore = screeningResult?.passed ? 80 : 40
@@ -282,8 +364,17 @@ function JobSimulator() {
     
     const behavioralMinimum = 60
     const hired = (weightedScore >= 65) && (score >= behavioralMinimum) && !meta?.disqualified
-    
-    setFinalResult({ hired, weightedScore, resumeScore, technicalScore, behavioralScore: score })
+
+    const behavioralFeedback = buildBehavioralFeedback(score, meta)
+    setFinalResult({
+      hired,
+      weightedScore,
+      resumeScore,
+      technicalScore,
+      behavioralScore: score,
+      behavioralFeedback,
+      behavioralMeta: meta
+    })
     setStage('result')
   }
 
@@ -976,6 +1067,15 @@ function JobSimulator() {
               <p>Behavioral: {finalResult.behavioralScore.toFixed(1)}%</p>
               <p><strong>Overall: {finalResult.weightedScore.toFixed(1)}%</strong></p>
             </div>
+            <div className="score-breakdown">
+              <h3>Behavioral Feedback</h3>
+              <p>{finalResult.behavioralFeedback?.summary}</p>
+              <ul>
+                {(finalResult.behavioralFeedback?.tips || []).map((tip: string, index: number) => (
+                  <li key={`behavioral-tip-${index}`}>{tip}</li>
+                ))}
+              </ul>
+            </div>
           </>
         ) : (
           <>
@@ -990,6 +1090,15 @@ function JobSimulator() {
               <p>Technical: {finalResult.technicalScore.toFixed(1)}%</p>
               <p>Behavioral: {finalResult.behavioralScore.toFixed(1)}%</p>
               <p><strong>Overall: {finalResult.weightedScore.toFixed(1)}%</strong></p>
+            </div>
+            <div className="score-breakdown">
+              <h3>Behavioral Feedback</h3>
+              <p>{finalResult.behavioralFeedback?.summary}</p>
+              <ul>
+                {(finalResult.behavioralFeedback?.tips || []).map((tip: string, index: number) => (
+                  <li key={`behavioral-tip-${index}`}>{tip}</li>
+                ))}
+              </ul>
             </div>
           </>
         )}

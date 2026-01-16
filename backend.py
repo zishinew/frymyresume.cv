@@ -3784,6 +3784,9 @@ async def behavioral_interview_websocket(websocket: WebSocket):
             "questions": [],
             "scores": [],
             "conversation_history": [],
+            "candidate_answers": {},
+            "server_transcripts": {},
+            "answers_recorded": set(),
             "company": company,
             "role": role
         }
@@ -3894,6 +3897,38 @@ Remember: You only speak when given a new message. Each message contains exactly
                     # (The transcription stream may be character-level; adding spaces makes it unreadable.)
                     return prev + chunk
 
+                def _normalize_transcript(text: str) -> str:
+                    return re.sub(r"\s+", " ", (text or "").strip())
+
+                def _store_candidate_transcript(question_number: int, text: str) -> None:
+                    if not isinstance(question_number, int) or question_number <= 0:
+                        return
+                    normalized = _normalize_transcript(text)
+                    if not normalized:
+                        return
+                    interview_state.setdefault("candidate_answers", {})[question_number] = normalized
+
+                def _record_candidate_answer(question_number: int) -> None:
+                    if not isinstance(question_number, int) or question_number <= 0:
+                        return
+                    recorded = interview_state.setdefault("answers_recorded", set())
+                    if question_number in recorded:
+                        return
+
+                    answers = interview_state.get("candidate_answers", {}) or {}
+                    text = answers.get(question_number, "")
+                    if not text:
+                        text = (interview_state.get("server_transcripts", {}) or {}).get(question_number, "")
+                    text = _normalize_transcript(text)
+                    if not text:
+                        text = "[inaudible]"
+
+                    interview_state["conversation_history"].append({
+                        "role": "candidate",
+                        "content": text
+                    })
+                    recorded.add(question_number)
+
                 # State for stable transcript streaming
                 awaiting_question_turn_complete = True  # first model turn should be Q1
                 awaiting_close_turn_complete = False
@@ -3974,18 +4009,7 @@ Remember: You only speak when given a new message. Each message contains exactly
                                         for part in user_turn.parts:
                                             if hasattr(part, 'text') and part.text:
                                                 user_text = part.text
-                                                interview_state["conversation_history"].append({
-                                                    "role": "candidate",
-                                                    "content": user_text
-                                                })
-                                                print(f"[User] Response: {user_text[:100]}...")
-
-                                                # Send transcript to frontend for display
-                                                await websocket.send_json({
-                                                    "type": "text",
-                                                    "content": user_text,
-                                                    "speaker": "candidate"
-                                                })
+                                                print(f"[User] Response (server transcript): {user_text[:100]}...")
 
                                 # Handle server content (audio from Gemini)
                                 if response.server_content:
@@ -3996,16 +4020,16 @@ Remember: You only speak when given a new message. Each message contains exactly
                                         now = time.monotonic()
                                         if now - last_in_sent >= 0.12 or getattr(response.server_content.input_transcription, 'finished', False):
                                             last_in_sent = now
-                                            await websocket.send_json({
-                                                "type": "text",
-                                                "content": in_transcript_local,
-                                                "speaker": "candidate"
-                                            })
+                                            try:
+                                                await websocket.send_json({
+                                                    "type": "text",
+                                                    "content": in_transcript_local,
+                                                    "speaker": "candidate"
+                                                })
+                                            except Exception:
+                                                pass
                                         if getattr(response.server_content.input_transcription, 'finished', False):
-                                            interview_state["conversation_history"].append({
-                                                "role": "candidate",
-                                                "content": in_transcript_local
-                                            })
+                                            interview_state.setdefault("server_transcripts", {})[current_question_in_flight] = in_transcript_local
 
                                     if response.server_content.output_transcription and getattr(response.server_content.output_transcription, 'text', None):
                                         # Intentionally ignored: output transcription is often garbled.
@@ -4014,9 +4038,14 @@ Remember: You only speak when given a new message. Each message contains exactly
 
                                     model_turn = response.server_content.model_turn
                                     if model_turn and model_turn.parts:
+                                        # Only forward interviewer audio while the interviewer is speaking
+                                        # (i.e., during question delivery or closing). This prevents
+                                        # any mid-answer interruptions or follow-ups from being heard.
+                                        allow_audio = awaiting_question_turn_complete or awaiting_close_turn_complete
                                         for part in model_turn.parts:
-                                            # Send audio data to frontend
                                             if hasattr(part, 'inline_data') and part.inline_data:
+                                                if not allow_audio:
+                                                    continue
                                                 audio_data = part.inline_data.data
                                                 mime_type = getattr(part.inline_data, 'mime_type', None)
                                                 sample_rate = 24000
@@ -4036,15 +4065,9 @@ Remember: You only speak when given a new message. Each message contains exactly
                                                     "data": base64.b64encode(audio_data).decode('utf-8')
                                                 })
 
-                                            # Also send text if model_turn includes it (rare in AUDIO mode)
+                                            # Ignore any interviewer text to avoid follow-ups in UI/state
                                             if hasattr(part, 'text') and part.text:
                                                 text_content = part.text
-                                                interview_state["conversation_history"].append({
-                                                    "role": "interviewer",
-                                                    "content": text_content
-                                                })
-                                                # Intentionally do not forward interviewer text to the UI.
-                                                # Canonical questions are delivered via message.type == "question".
                                                 print(f"[Gemini] (interviewer text ignored) {text_content[:100]}...")
 
                                     # Handle turn completion
@@ -4110,6 +4133,16 @@ Remember: You only speak when given a new message. Each message contains exactly
                         MIN_AUDIO_CHUNKS = 3
                         while True:
                             message = await websocket.receive_json()
+
+                            if message.get("type") == "transcript_final":
+                                qn = message.get("question_number")
+                                text = message.get("text", "")
+                                try:
+                                    qn = int(qn)
+                                except Exception:
+                                    qn = current_question_in_flight
+                                _store_candidate_transcript(qn, text)
+                                continue
 
                             if message.get("type") == "audio":
                                 # Ignore any stray audio while the interviewer is speaking.
@@ -4183,6 +4216,7 @@ Remember: You only speak when given a new message. Each message contains exactly
                                 answered_q = current_question_in_flight
                                 print(f"[WebSocket] User finished response for Q{answered_q}")
                                 candidate_turn_active = False
+                                _record_candidate_answer(answered_q)
                                 # Explicitly signal end of audio stream; otherwise Gemini may wait.
                                 await session.send_realtime_input(audio_stream_end=True)
 
@@ -4203,7 +4237,7 @@ Remember: You only speak when given a new message. Each message contains exactly
                                 # Drive the conversation explicitly so we always advance.
                                 if interview_state["answers_completed"] < interview_state["max_questions"]:
                                     next_q = interview_state["answers_completed"] + 1
-                                    await _send_canonical_question(next_q, acknowledge_first=True)
+                                    await _send_canonical_question(next_q, acknowledge_first=False)
                                 elif interview_state["answers_completed"] >= interview_state["max_questions"]:
                                     # After the 3rd response, send a closing statement
                                     # Send ONLY what we want Gemini to say - no meta-instructions

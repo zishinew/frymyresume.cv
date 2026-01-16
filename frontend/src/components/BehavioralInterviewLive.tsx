@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { WS_BASE_URL } from '../config'
+import { STTClient } from '../lib/stt'
 import './BehavioralInterview.css'
 import LoadingScreen from './LoadingScreen'
 
@@ -18,6 +19,9 @@ function BehavioralInterviewLive({ company, role, onComplete }: BehavioralInterv
   const [totalQuestions] = useState(3)
   const [interviewStarted, setInterviewStarted] = useState(false)
   const [userTranscript, setUserTranscript] = useState<string>('')
+  const [partialTranscript, setPartialTranscript] = useState<string>('')
+  const [fallbackTranscript, setFallbackTranscript] = useState<string>('')
+  const [sttAvailable, setSttAvailable] = useState<boolean>(true)
   const [isReviewing, setIsReviewing] = useState(false)
 
   const wsRef = useRef<WebSocket | null>(null)
@@ -27,6 +31,12 @@ function BehavioralInterviewLive({ company, role, onComplete }: BehavioralInterv
   const audioQueueRef = useRef<AudioBuffer[]>([])
   const isPlayingRef = useRef(false)
   const shouldCloseWsOnOpenRef = useRef(false)
+
+  const sttRef = useRef<STTClient | null>(null)
+  const lastFinalTranscriptRef = useRef('')
+  const lastPartialTranscriptRef = useRef('')
+  const partialCommitTimeoutRef = useRef<number | null>(null)
+  const questionIndexRef = useRef(0)
 
   const isListeningRef = useRef(false)
   const interviewEndedRef = useRef(false)
@@ -42,14 +52,71 @@ function BehavioralInterviewLive({ company, role, onComplete }: BehavioralInterv
     if (!n) return p
     if (!p) return n
     if (n === p) return p
-    if (n.length >= p.length && (n.includes(p) || p.includes(n) || n.startsWith(p))) return n
-    if (p.length > n.length && (p.includes(n) || p.startsWith(n))) return p
-    return n.length >= p.length ? n : p
+    if (n.startsWith(p)) return n
+    if (p.startsWith(n)) return p
+    if (n.includes(p)) return n
+    if (p.includes(n)) return p
+    return `${p} ${n}`.trim()
+  }
+
+  const commitPartialToFinal = () => {
+    const partial = (lastPartialTranscriptRef.current || '').trim()
+    if (!partial) return
+    const merged = mergeTranscript(lastFinalTranscriptRef.current, partial)
+    lastFinalTranscriptRef.current = merged
+    lastPartialTranscriptRef.current = ''
+    setUserTranscript(merged)
+    setPartialTranscript('')
   }
 
   useEffect(() => {
     isListeningRef.current = isListening
   }, [isListening])
+
+  useEffect(() => {
+    questionIndexRef.current = questionIndex
+  }, [questionIndex])
+
+  useEffect(() => {
+    sttRef.current = new STTClient((text, isFinal) => {
+      const cleaned = (text || '').trim()
+      if (!cleaned) return
+
+      if (isFinal) {
+        if (partialCommitTimeoutRef.current) {
+          window.clearTimeout(partialCommitTimeoutRef.current)
+          partialCommitTimeoutRef.current = null
+        }
+        const mergedFinal = mergeTranscript(
+          mergeTranscript(lastFinalTranscriptRef.current, lastPartialTranscriptRef.current),
+          cleaned
+        )
+        lastFinalTranscriptRef.current = mergedFinal
+        lastPartialTranscriptRef.current = ''
+        setUserTranscript(mergedFinal)
+        setPartialTranscript('')
+      } else {
+        if (partialCommitTimeoutRef.current) {
+          window.clearTimeout(partialCommitTimeoutRef.current)
+        }
+        lastPartialTranscriptRef.current = cleaned
+        const combined = lastFinalTranscriptRef.current
+          ? `${lastFinalTranscriptRef.current} ${cleaned}`
+          : cleaned
+        setPartialTranscript(combined)
+        partialCommitTimeoutRef.current = window.setTimeout(() => {
+          commitPartialToFinal()
+          partialCommitTimeoutRef.current = null
+        }, 900)
+      }
+    })
+    setSttAvailable(sttRef.current.isAvailable())
+
+    return () => {
+      sttRef.current?.stop()
+      sttRef.current = null
+    }
+  }, [])
 
   useEffect(() => {
     connectWebSocket()
@@ -92,6 +159,22 @@ function BehavioralInterviewLive({ company, role, onComplete }: BehavioralInterv
         ws.close()
       }
     }
+
+    if (sttRef.current) {
+      sttRef.current.stop()
+    }
+  }
+
+  const resetTranscriptState = () => {
+    if (partialCommitTimeoutRef.current) {
+      window.clearTimeout(partialCommitTimeoutRef.current)
+      partialCommitTimeoutRef.current = null
+    }
+    lastFinalTranscriptRef.current = ''
+    lastPartialTranscriptRef.current = ''
+    setUserTranscript('')
+    setPartialTranscript('')
+    setFallbackTranscript('')
   }
 
   const connectWebSocket = () => {
@@ -135,6 +218,7 @@ function BehavioralInterviewLive({ company, role, onComplete }: BehavioralInterv
             if (isListeningRef.current) {
               stopListening(false, true)
             }
+            resetTranscriptState()
             if (typeof message.content === 'string') {
               setCurrentQuestion(message.content)
             }
@@ -150,7 +234,8 @@ function BehavioralInterviewLive({ company, role, onComplete }: BehavioralInterv
               // The Live output transcription is often garbled; keep it separate if desired.
               // Ignore.
             } else if (message.speaker === 'candidate') {
-              setUserTranscript((prev) => mergeTranscript(prev, message.content))
+              // Keep a fallback transcript for UI display.
+              setFallbackTranscript((prev) => mergeTranscript(prev, message.content))
             }
             break
 
@@ -181,7 +266,7 @@ function BehavioralInterviewLive({ company, role, onComplete }: BehavioralInterv
             // Backend didn't get enough real audio to count as an answer.
             // Restart mic capture so the user can respond without clicking.
             if (!interviewEndedRef.current) {
-              setUserTranscript('')
+              resetTranscriptState()
               if (!isListeningRef.current) {
                 await startListening()
               }
@@ -194,6 +279,7 @@ function BehavioralInterviewLive({ company, role, onComplete }: BehavioralInterv
             if (isListeningRef.current) {
               stopListening(false, true)
             }
+            sttRef.current?.stop()
             break
 
           case 'interview_complete':
@@ -477,6 +563,9 @@ function BehavioralInterviewLive({ company, role, onComplete }: BehavioralInterv
       processor.connect(audioContext.destination)
 
       setIsListening(true)
+      if (sttRef.current?.isAvailable()) {
+        sttRef.current.start()
+      }
       console.log('Started listening')
     } catch (err) {
       console.error('Failed to start listening:', err)
@@ -485,6 +574,21 @@ function BehavioralInterviewLive({ company, role, onComplete }: BehavioralInterv
   }
 
   const stopListening = (sendEndOfTurn: boolean = true, updateState: boolean = true) => {
+    commitPartialToFinal()
+
+    if (sttRef.current) {
+      sttRef.current.stop()
+    }
+
+    if (sendEndOfTurn && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      const transcript = (lastFinalTranscriptRef.current || lastPartialTranscriptRef.current || userTranscript || partialTranscript).trim()
+      wsRef.current.send(JSON.stringify({
+        type: 'transcript_final',
+        question_number: questionIndexRef.current + 1,
+        text: transcript
+      }))
+    }
+
     // Stop audio processing
     if (processorRef.current) {
       processorRef.current.disconnect()
@@ -534,20 +638,45 @@ function BehavioralInterviewLive({ company, role, onComplete }: BehavioralInterv
       <div className="response-section">
         <h3>Your Response</h3>
 
-        {userTranscript && (
-          <div style={{
-            padding: '1rem',
-            backgroundColor: '#f0f7ff',
-            borderRadius: '8px',
-            marginBottom: '1rem',
-            border: '1px solid #d0e7ff'
-          }}>
-            <p style={{ fontSize: '0.85rem', color: '#666', marginBottom: '0.5rem' }}>
-              What I heard:
-            </p>
-            <p style={{ fontSize: '0.95rem', color: '#333' }}>
-              "{userTranscript}"
-            </p>
+        {(userTranscript || partialTranscript) && (
+          <div className="transcript transcript-card">
+            <div className="transcript-header">
+              <span className="transcript-label">Live Transcript</span>
+              <span className="transcript-status">Listening</span>
+            </div>
+            <div className="transcript-body">
+              <p className="transcript-text">
+                {partialTranscript || userTranscript}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {!userTranscript && !partialTranscript && fallbackTranscript && (
+          <div className="transcript transcript-card">
+            <div className="transcript-header">
+              <span className="transcript-label">Live Transcript</span>
+              <span className="transcript-status">Listening</span>
+            </div>
+            <div className="transcript-body">
+              <p className="transcript-text">
+                {fallbackTranscript}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {!userTranscript && !partialTranscript && !fallbackTranscript && isListening && (
+          <div className="transcript transcript-card transcript-empty">
+            <div className="transcript-header">
+              <span className="transcript-label">Live Transcript</span>
+              <span className="transcript-status">Listening</span>
+            </div>
+            <div className="transcript-body">
+              <p className="transcript-text transcript-placeholder">
+                {sttAvailable ? 'Start speaking and your transcript will appear here.' : 'Listening… transcript will appear when received.'}
+              </p>
+            </div>
           </div>
         )}
 
