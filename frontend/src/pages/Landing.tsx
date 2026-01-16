@@ -9,6 +9,7 @@ function Landing() {
   const fullTitle = 'frymyresume.cv'
   const [typedTitle, setTypedTitle] = useState('')
   const [isTitleTyped, setIsTitleTyped] = useState(false)
+  const [showBrowserWarning, setShowBrowserWarning] = useState(false)
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -82,8 +83,26 @@ function Landing() {
     return () => window.removeEventListener('mousemove', handleMouseMove)
   }, [])
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const ua = window.navigator.userAgent || ''
+    const isEdge = /Edg\//.test(ua)
+    const isChrome = /Chrome\//.test(ua) || /Chromium\//.test(ua)
+    const isBrave = /Brave\//.test(ua)
+    const isOpera = /OPR\//.test(ua)
+    const isChromiumBased = isChrome || isEdge || isBrave || isOpera
+
+    setShowBrowserWarning(!isChromiumBased)
+  }, [])
+
   return (
     <div className="landing" style={{ minHeight: '100vh', background: 'var(--bg-primary)' }}>
+      {showBrowserWarning && (
+        <div className="browser-warning">
+          Behavioural interviews will not work properly on this browser! Please use Chrome for the best experience.
+        </div>
+      )}
       <div className="landing-split">
         {/* Left Side - Content */}
         <div className={`landing-left ${isLoaded ? 'loaded' : ''}`}>
