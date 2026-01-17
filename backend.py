@@ -58,6 +58,8 @@ def _strip_trailing_slash(value: str) -> str:
 
 allowed_origins = [
     _strip_trailing_slash(FRONTEND_URL),
+    "https://frymyresume.cv",
+    "https://www.frymyresume.cv",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ]
