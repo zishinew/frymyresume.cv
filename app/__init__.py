@@ -1,0 +1,1 @@
+# FryMyResume Authentication Module

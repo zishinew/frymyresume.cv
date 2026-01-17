@@ -1,7 +1,10 @@
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, WebSocketDisconnect, Depends
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from starlette.middleware.sessions import SessionMiddleware
+from sqlalchemy.orm import Session
 import PyPDF2
 import io
 import os
@@ -11,14 +14,42 @@ import base64
 import requests
 import asyncio
 import json
-from datetime import date
+from datetime import date, datetime
 from google import genai
 from dotenv import load_dotenv
 from typing import Optional, Any
 
 load_dotenv()
 
+# Import auth modules
+from app.database import get_db, init_db
+from app.routers import auth_router, users_router, jobs_router, friends_router
+from app.dependencies import get_current_user_optional
+from app.models.user import User, UserProfile
+from app.models.job_application import JobApplication
+
 app = FastAPI(title="FryMyResume API")
+
+UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "uploads")
+os.makedirs(UPLOADS_DIR, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
+
+# Add session middleware for OAuth
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.getenv("JWT_SECRET_KEY", "dev-secret-key"),
+)
+
+# Include auth routers
+app.include_router(auth_router)
+app.include_router(users_router)
+app.include_router(jobs_router)
+app.include_router(friends_router)
+
+# Initialize database on startup
+@app.on_event("startup")
+async def startup_event():
+    init_db()
 
 # Configure CORS
 app.add_middleware(

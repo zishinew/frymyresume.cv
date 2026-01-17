@@ -5,6 +5,92 @@
   position: relative;
 }
 
+/* Header */
+.landing-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 2rem;
+  z-index: 10;
+}
+
+.header-logo {
+  display: inline-flex;
+  align-items: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: -0.02em;
+}
+
+.header-logo img {
+  display: block;
+  height: 28px;
+  width: auto;
+  object-fit: contain;
+}
+
+.header-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.header-link {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  color: var(--text-primary);
+  text-decoration: none;
+  font-size: 0.9rem;
+  font-weight: 500;
+  border-radius: 8px;
+  transition: background 0.2s;
+}
+
+.header-link:hover {
+  background: var(--bg-secondary);
+}
+
+.header-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.header-avatar-placeholder {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: white;
+  border-radius: 50%;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.header-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.header-btn.secondary {
+  color: inherit;
+}
+
 .browser-warning {
   position: sticky;
   top: 0;
@@ -74,18 +160,22 @@
 .landing-split {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  min-height: 100vh;
+  min-height: calc(100vh - 56px);
   position: relative;
   z-index: 1;
 }
 
 .landing-left, .landing-right {
-  padding: 4rem;
+  padding: 2.5rem;
   display: flex;
   align-items: center;
   opacity: 0;
   transform: translateX(-30px);
   transition: all 0.6s ease-out;
+}
+
+.landing-left {
+  padding-top: 3.25rem;
 }
 
 .landing-left.loaded {
@@ -100,12 +190,15 @@
 }
 
 .landing-content {
+  display: flex;
+  flex-direction: column;
   max-width: 540px;
   width: 100%;
+  gap: 1.5rem;
 }
 
 .brand-section {
-  margin-bottom: 3rem;
+  margin-bottom: 1.5rem;
 }
 
 .brand-title {
@@ -113,9 +206,9 @@
   font-size: 5rem;
   font-weight: 700;
   color: var(--text-primary);
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
   letter-spacing: -0.03em;
-  padding-bottom: 1rem;
+  padding-bottom: 0.75rem;
   display: inline-block;
   animation: fadeInUp 0.8s ease-out;
   position: relative;
@@ -160,20 +253,20 @@
 }
 
 .brand-tagline {
-  font-size: 1.125rem;
+  font-size: 1rem;
   color: var(--text-secondary);
   line-height: 1.6;
   animation: fadeInUp 0.8s ease-out 0.2s both;
 }
 
 .features-list {
-  margin-bottom: 3rem;
+  margin-bottom: 1.5rem;
 }
 
 .feature-item {
   display: flex;
   gap: 1.5rem;
-  margin-bottom: 2rem;
+  margin-bottom: 1.25rem;
   opacity: 0;
   animation: fadeInUp 0.6s ease-out forwards;
 }
@@ -229,7 +322,7 @@
 }
 
 .feature-info h3 {
-  font-size: 1.125rem;
+  font-size: 1.05rem;
   font-weight: 600;
   color: var(--text-primary);
   margin-bottom: 0.25rem;
@@ -237,7 +330,7 @@
 }
 
 .feature-info p {
-  font-size: 0.9375rem;
+  font-size: 0.875rem;
   color: var(--text-tertiary);
   line-height: 1.5;
 }
@@ -245,7 +338,7 @@
 .cta-buttons {
   display: flex;
   gap: 1rem;
-  margin-bottom: 3rem;
+  margin-bottom: 1.5rem;
   animation: fadeInUp 0.8s ease-out 0.6s both;
 }
 
@@ -317,7 +410,7 @@
 .landing-stats {
   display: flex;
   gap: 3rem;
-  padding-top: 2rem;
+  padding-top: 0.75rem;
   border-top: 1px solid var(--border-color);
   animation: fadeInUp 0.8s ease-out 0.7s both;
 }
@@ -351,7 +444,7 @@
 }
 
 .stat-value {
-  font-size: 0.875rem;
+  font-size: 1rem;
   font-weight: 600;
   color: var(--text-primary);
   background: linear-gradient(90deg, var(--text-primary), var(--accent));
@@ -372,7 +465,7 @@
 }
 
 .stat-label {
-  font-size: 0.8125rem;
+  font-size: 1rem;
   color: var(--text-tertiary);
 }
 
@@ -756,11 +849,12 @@
   }
 
   .stat-value {
-    font-size: 0.8125rem;
+    font-size: 1rem;
+    font-weight: 600;
   }
 
   .stat-label {
-    font-size: 0.75rem;
+    font-size: 1rem;
   }
 
   .demo-video {

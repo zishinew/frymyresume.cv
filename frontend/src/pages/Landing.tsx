@@ -1,9 +1,11 @@
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { useState, useEffect } from 'react'
+import { useAuth } from '../contexts/AuthContext'
 import './Landing.css'
 
 function Landing() {
   const navigate = useNavigate()
+  const { user, isAuthenticated, logout } = useAuth()
   const [isLoaded, setIsLoaded] = useState(false)
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 })
   const fullTitle = 'frymyresume.cv'
@@ -106,6 +108,39 @@ function Landing() {
           Behavioural interviews will not work properly on this browser! Please use Chrome for the best experience.
         </div>
       )}
+      <header className="landing-header">
+        <Link to="/" className="header-logo">
+          <img src="/icon.png" alt="frymyresume.cv" />
+        </Link>
+        <nav className="header-nav">
+          {isAuthenticated ? (
+            <>
+              <Link to="/profile" className="header-link">
+                {user?.profile_picture ? (
+                  <img src={user.profile_picture} alt="" className="header-avatar" />
+                ) : (
+                  <span className="header-avatar-placeholder">
+                    {(user?.username || user?.email || '?')[0].toUpperCase()}
+                  </span>
+                )}
+                <span>{user?.username || 'Profile'}</span>
+              </Link>
+              <button onClick={logout} className="header-btn cta-secondary">
+                Sign out
+              </button>
+            </>
+          ) : (
+            <>
+              <Link to="/login" className="header-btn cta-secondary">
+                Sign in
+              </Link>
+              <Link to="/register" className="header-btn cta-primary">
+                Sign up
+              </Link>
+            </>
+          )}
+        </nav>
+      </header>
       <div className="landing-split">
         {/* Left Side - Content */}
         <div className={`landing-left ${isLoaded ? 'loaded' : ''}`}>

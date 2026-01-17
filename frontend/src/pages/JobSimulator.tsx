@@ -599,7 +599,6 @@ function JobSimulator() {
               type="search"
               value={realJobsQuery}
               onChange={(e) => setRealJobsQuery(e.target.value)}
-              placeholder="Search role, company, or location…"
               aria-label="Search real job listings"
               onKeyDown={(e) => {
                 if (e.key === 'Enter') setRealJobsReloadToken((t) => t + 1)

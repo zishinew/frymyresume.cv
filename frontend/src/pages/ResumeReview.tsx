@@ -212,7 +212,6 @@ function ResumeReview() {
                 <label className="job-role-label">Target Job Role</label>
                 <input
                   type="text"
-                  placeholder="e.g., Software Engineer, Product Manager"
                   value={jobRole}
                   onChange={(e) => setJobRole(e.target.value)}
                   className="job-role-input"
