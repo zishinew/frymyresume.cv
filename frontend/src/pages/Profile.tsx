@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { api } from '../services/api'
 import { API_BASE_URL } from '../config'
+import { supabase } from '../lib/supabase'
 import './Profile.css'
 
 interface JobApplication {
@@ -183,7 +184,9 @@ export default function Profile() {
     const formData = new FormData()
     formData.append('file', profileFile)
 
-    const token = localStorage.getItem('access_token')
+    // Get token from Supabase session
+    const { data: { session } } = await supabase.auth.getSession()
+    const token = session?.access_token
     const response = await fetch(`${API_BASE_URL}/api/users/profile-picture`, {
       method: 'POST',
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,

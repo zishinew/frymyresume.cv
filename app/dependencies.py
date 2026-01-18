@@ -1,12 +1,31 @@
 from typing import Optional
+import json
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 from pydantic import BaseModel
 from app.config import SUPABASE_JWT_SECRET
 from app.supabase_client import get_supabase_admin
+import os
 
 security = HTTPBearer(auto_error=False)
+
+# Get the public key for ES256 verification (if available)
+# Can be either PEM format or JWK JSON format
+_raw_public_key = os.getenv("SUPABASE_JWT_PUBLIC_KEY", "")
+
+# Parse public key - handle both PEM and JWK formats
+SUPABASE_JWT_PUBLIC_KEY = None
+if _raw_public_key:
+    if _raw_public_key.startswith("-----BEGIN"):
+        # PEM format
+        SUPABASE_JWT_PUBLIC_KEY = _raw_public_key.replace("\\n", "\n")
+    elif _raw_public_key.startswith("{"):
+        # JWK JSON format - parse and use directly
+        try:
+            SUPABASE_JWT_PUBLIC_KEY = json.loads(_raw_public_key)
+        except json.JSONDecodeError:
+            print("Warning: Could not parse SUPABASE_JWT_PUBLIC_KEY as JWK")
 
 
 class SupabaseUser(BaseModel):
@@ -36,12 +55,23 @@ async def get_current_user(
 
     try:
         # Decode and verify Supabase JWT
-        payload = jwt.decode(
-            token,
-            SUPABASE_JWT_SECRET,
-            algorithms=["HS256"],
-            audience="authenticated",
-        )
+        # Support both ES256 (new) and HS256 (legacy) algorithms
+        if SUPABASE_JWT_PUBLIC_KEY:
+            # New ES256 signing with public key
+            payload = jwt.decode(
+                token,
+                SUPABASE_JWT_PUBLIC_KEY,
+                algorithms=["ES256"],
+                audience="authenticated",
+            )
+        else:
+            # Legacy HS256 signing with shared secret
+            payload = jwt.decode(
+                token,
+                SUPABASE_JWT_SECRET,
+                algorithms=["HS256"],
+                audience="authenticated",
+            )
 
         user_id = payload.get("sub")
         if not user_id:
@@ -71,7 +101,10 @@ async def get_current_user(
             is_verified=payload.get("email_confirmed_at") is not None,
         )
 
-    except JWTError:
+    except JWTError as e:
+        print(f"JWT Error: {e}")
+        print(f"Token (first 50 chars): {token[:50]}...")
+        print(f"Secret (first 20 chars): {SUPABASE_JWT_SECRET[:20] if SUPABASE_JWT_SECRET else 'None'}...")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",

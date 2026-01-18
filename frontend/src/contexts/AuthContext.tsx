@@ -36,22 +36,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      if (session) {
-        fetchUserProfile(session.access_token)
-      } else {
+    let isMounted = true
+
+    // Get initial session with timeout
+    const initAuth = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!isMounted) return
+
+        setSession(session)
+        if (session) {
+          await fetchUserProfile(session)
+        } else {
+          setIsLoading(false)
+        }
+      } catch (error) {
+        console.error('Error getting session:', error)
+        if (isMounted) {
+          setIsLoading(false)
+        }
+      }
+    }
+
+    // Set a timeout to ensure loading state is cleared even if Supabase hangs
+    const timeoutId = setTimeout(() => {
+      if (isMounted) {
+        console.warn('Auth initialization timed out')
         setIsLoading(false)
       }
-    })
+    }, 5000)
+
+    initAuth().finally(() => clearTimeout(timeoutId))
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
+        if (!isMounted) return
         setSession(session)
         if (session) {
-          await fetchUserProfile(session.access_token)
+          await fetchUserProfile(session)
         } else {
           setUser(null)
           setIsLoading(false)
@@ -59,55 +82,57 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     )
 
-    return () => subscription.unsubscribe()
+    return () => {
+      isMounted = false
+      subscription.unsubscribe()
+    }
   }, [])
 
-  const getUserFromSupabase = async (): Promise<User | null> => {
-    const { data: { user: supabaseUser } } = await supabase.auth.getUser()
-    if (supabaseUser) {
-      return {
-        id: supabaseUser.id,
-        email: supabaseUser.email || '',
-        username: supabaseUser.user_metadata?.full_name || supabaseUser.user_metadata?.name || supabaseUser.email?.split('@')[0] || '',
-        profile_picture: supabaseUser.user_metadata?.avatar_url || null,
-        auth_provider: supabaseUser.app_metadata?.provider || 'email',
-        is_verified: !!supabaseUser.email_confirmed_at,
-        created_at: supabaseUser.created_at,
-      }
+  const buildUserFromSession = (session: Session): User => {
+    const supabaseUser = session.user
+    return {
+      id: supabaseUser.id,
+      email: supabaseUser.email || '',
+      username: supabaseUser.user_metadata?.full_name || supabaseUser.user_metadata?.name || supabaseUser.email?.split('@')[0] || '',
+      profile_picture: supabaseUser.user_metadata?.avatar_url || null,
+      auth_provider: supabaseUser.app_metadata?.provider || 'email',
+      is_verified: !!supabaseUser.email_confirmed_at,
+      created_at: supabaseUser.created_at,
     }
-    return null
   }
 
-  const fetchUserProfile = async (accessToken: string) => {
+  const fetchUserProfile = async (session: Session) => {
     try {
-      // First, set user from Supabase immediately so UI updates
-      const supabaseUserData = await getUserFromSupabase()
-      if (supabaseUserData) {
-        setUser(supabaseUserData)
-      }
+      // Build user from session data immediately (no network call needed)
+      const userData = buildUserFromSession(session)
+      setUser(userData)
+      setIsLoading(false)
 
-      // Then try to get enhanced profile from backend (non-blocking)
+      // Then try to get enhanced profile from backend (non-blocking, fire and forget)
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 3000) // 3 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 2000) // 2 second timeout
 
-      try {
-        const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-          signal: controller.signal,
+      fetch(`${API_BASE_URL}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        signal: controller.signal,
+      })
+        .then((response) => {
+          clearTimeout(timeoutId)
+          if (response.ok) {
+            return response.json()
+          }
+          return null
         })
-        clearTimeout(timeoutId)
-
-        if (response.ok) {
-          const userData = await response.json()
-          setUser(userData)
-        }
-      } catch {
-        // Backend not available - that's fine, we already have Supabase data
-      }
+        .then((backendUserData) => {
+          if (backendUserData) {
+            setUser(backendUserData)
+          }
+        })
+        .catch(() => {
+          // Backend not available - that's fine, we already have Supabase data
+        })
     } catch {
-      // Supabase error - set user to null
       setUser(null)
-    } finally {
       setIsLoading(false)
     }
   }
@@ -115,18 +140,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshUser = async () => {
     const { data: { session } } = await supabase.auth.getSession()
     if (session) {
-      await fetchUserProfile(session.access_token)
+      await fetchUserProfile(session)
     }
   }
 
   const login = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
     })
 
     if (error) {
       throw new Error(error.message)
+    }
+
+    // Fetch user profile immediately after login
+    if (data.session) {
+      await fetchUserProfile(data.session)
     }
   }
 
