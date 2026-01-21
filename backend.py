@@ -3243,7 +3243,7 @@ def compare_outputs(actual: Any, expected: Any) -> bool:
 
 @app.post("/api/start-voice-interview")
 async def start_voice_interview(request: VoiceInterviewRequest):
-    """Start a voice interview session using ElevenLabs."""
+    """Start a voice interview session."""
     try:
         import uuid
         session_id = str(uuid.uuid4())
@@ -3283,55 +3283,11 @@ async def start_voice_interview(request: VoiceInterviewRequest):
         
         print(f"[DEBUG] Started interview for {request.role} at {request.company}")
         print(f"[DEBUG] Session {session_id}: questions_asked = 1, max_questions = 3")
-        
-        # Generate audio for first question using ElevenLabs
-        ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
-        audio_base64 = None
-        
-        if ELEVENLABS_API_KEY:
-            try:
-                headers = {
-                    "xi-api-key": ELEVENLABS_API_KEY,
-                    "Content-Type": "application/json"
-                }
-                data = {
-                    "text": first_question,
-                    "model_id": "eleven_multilingual_v2",
-                    "voice_settings": {
-                        "stability": 0.5,
-                        "similarity_boost": 0.75
-                    }
-                }
-                
-                voice_id = "21m00Tcm4TlvDq8ikWAM"  # Rachel voice
-                import asyncio
-                response = await asyncio.to_thread(
-                    lambda: requests.post(
-                        f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
-                        headers=headers,
-                        json=data,
-                        timeout=30
-                    )
-                )
 
-                if response.status_code == 200:
-                    audio_base64 = base64.b64encode(response.content).decode('utf-8')
-                    print(f"ElevenLabs TTS success: Generated audio for question 1")
-                else:
-                    error_detail = response.text if response.text else "No error details"
-                    print(f"ElevenLabs API error: {response.status_code} - {error_detail}")
-                    if response.status_code == 401:
-                        print("ElevenLabs authentication failed. Please check your API key or account quota.")
-                    elif response.status_code == 429:
-                        print("ElevenLabs rate limit exceeded. Please wait before making more requests.")
-            except Exception as e:
-                print(f"ElevenLabs error: {str(e)}")
-        
         print(f"[DEBUG] Start interview response: question_number=1")
         return JSONResponse(content={
             "session_id": session_id,
             "first_question": first_question,
-            "audio_base64": audio_base64,
             "question_number": 1,
             "total_questions": 3
         })
@@ -3500,55 +3456,11 @@ Return ONLY the question, nothing else."""
             "role": "interviewer",
             "content": next_response
         })
-        
-        # Generate audio for response using ElevenLabs
-        ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
-        audio_base64 = None
-        
-        if ELEVENLABS_API_KEY:
-            try:
-                headers = {
-                    "xi-api-key": ELEVENLABS_API_KEY,
-                    "Content-Type": "application/json"
-                }
-                data = {
-                    "text": next_response,
-                    "model_id": "eleven_multilingual_v2",
-                    "voice_settings": {
-                        "stability": 0.5,
-                        "similarity_boost": 0.75
-                    }
-                }
-                
-                voice_id = "21m00Tcm4TlvDq8ikWAM"  # Rachel voice
-                import asyncio
-                response = await asyncio.to_thread(
-                    lambda: requests.post(
-                        f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
-                        headers=headers,
-                        json=data,
-                        timeout=30
-                    )
-                )
-
-                if response.status_code == 200:
-                    audio_base64 = base64.b64encode(response.content).decode('utf-8')
-                    print(f"ElevenLabs TTS success: Generated audio")
-                else:
-                    error_detail = response.text if response.text else "No error details"
-                    print(f"ElevenLabs API error: {response.status_code} - {error_detail}")
-                    if response.status_code == 401:
-                        print("ElevenLabs authentication failed. Please check your API key or account quota.")
-                    elif response.status_code == 429:
-                        print("ElevenLabs rate limit exceeded. Please wait before making more requests.")
-            except Exception as e:
-                print(f"ElevenLabs error: {str(e)}")
 
         print(f"[DEBUG] Returning question_number: {next_question_number}, completed: False")
-        
+
         return JSONResponse(content={
             "next_question": next_response,
-            "audio_base64": audio_base64,
             "question_number": next_question_number,
             "total_questions": session["max_questions"],
             "completed": False

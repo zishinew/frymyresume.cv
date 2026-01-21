@@ -51,3 +51,4 @@ IMPLEMENTATION_SUMMARY.md
 NEXT_STEPS.md
 .vercel
 .env*.local
+.claude/
