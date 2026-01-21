@@ -269,7 +269,7 @@ def _generate_problem_fallback(question: dict) -> dict:
     }
 
 
-def _generate_original_problem_from_metadata(question: dict) -> dict:
+async def _generate_original_problem_from_metadata(question: dict) -> dict:
     """Use Gemini to generate an original problem prompt + deterministic tests.
 
     Important: We do not fetch or reproduce any copyrighted LeetCode statements.
@@ -313,7 +313,7 @@ Requirements:
 """
 
     client = genai.Client(api_key=GEMINI_API_KEY)
-    response = call_gemini_with_retry(
+    response = await call_gemini_with_retry_async(
         client=client,
         model="gemini-2.5-flash",
         contents=prompt,
@@ -534,7 +534,8 @@ def _parse_simplifyjobs_readme_tables(readme: str) -> list[dict]:
     return deduped
 
 
-def _get_simplifyjobs_listings_cached(max_age_seconds: int = 60 * 60) -> list[dict]:
+def _get_simplifyjobs_listings_cached_sync(max_age_seconds: int = 60 * 60) -> list[dict]:
+    """Synchronous version - use _get_simplifyjobs_listings_cached for async contexts."""
     now = time.time()
     if _simplifyjobs_cache["jobs"] and (now - float(_simplifyjobs_cache["fetched_at"])) < max_age_seconds:
         return _simplifyjobs_cache["jobs"]
@@ -587,6 +588,17 @@ def _get_simplifyjobs_listings_cached(max_age_seconds: int = 60 * 60) -> list[di
     if _simplifyjobs_cache["jobs"]:
         return _simplifyjobs_cache["jobs"]
     raise last_error or RuntimeError("Failed to fetch SimplifyJobs README")
+
+
+async def _get_simplifyjobs_listings_cached(max_age_seconds: int = 60 * 60) -> list[dict]:
+    """Async wrapper to avoid blocking the event loop during GitHub fetch."""
+    import asyncio
+    # Check cache first (no I/O needed)
+    now = time.time()
+    if _simplifyjobs_cache["jobs"] and (now - float(_simplifyjobs_cache["fetched_at"])) < max_age_seconds:
+        return _simplifyjobs_cache["jobs"]
+    # Need to fetch - run in thread pool to avoid blocking
+    return await asyncio.to_thread(_get_simplifyjobs_listings_cached_sync, max_age_seconds)
 
 
 def _html_to_text(html: str) -> str:
@@ -669,7 +681,8 @@ _job_posting_cache: dict[str, dict] = {}
 _job_posting_details_cache: dict[str, dict] = {}
 
 
-def _fetch_job_posting_text(url: str, max_chars: int = 8000) -> Optional[str]:
+def _fetch_job_posting_text_sync(url: str, max_chars: int = 8000) -> Optional[str]:
+    """Synchronous version - use _fetch_job_posting_text for async contexts."""
     if not url or not isinstance(url, str):
         return None
     u = url.strip()
@@ -706,7 +719,24 @@ def _fetch_job_posting_text(url: str, max_chars: int = 8000) -> Optional[str]:
         return None
 
 
-def _summarize_job_posting_to_requirements(
+async def _fetch_job_posting_text(url: str, max_chars: int = 8000) -> Optional[str]:
+    """Async wrapper to avoid blocking the event loop during job posting fetch."""
+    import asyncio
+    # Check cache first (no I/O needed)
+    if not url or not isinstance(url, str):
+        return None
+    u = url.strip()
+    if not (u.startswith("http://") or u.startswith("https://")):
+        return None
+    now = time.time()
+    cached = _job_posting_cache.get(u)
+    if cached and (now - float(cached.get("fetched_at", 0))) < 60 * 60 * 6:
+        return cached.get("text")
+    # Need to fetch - run in thread pool to avoid blocking
+    return await asyncio.to_thread(_fetch_job_posting_text_sync, url, max_chars)
+
+
+async def _summarize_job_posting_to_requirements(
     *,
     posting_text: str,
     company: Optional[str] = None,
@@ -757,7 +787,7 @@ JOB POSTING TEXT:
 {t}
 """
 
-        resp = call_gemini_with_retry(
+        resp = await call_gemini_with_retry_async(
             client=client,
             model="gemini-2.5-flash",
             contents=prompt,
@@ -815,7 +845,7 @@ async def list_real_jobs(q: str = "", limit: int = 100, offset: int = 0):
     offset = max(0, int(offset))
 
     try:
-        jobs = _get_simplifyjobs_listings_cached()
+        jobs = await _get_simplifyjobs_listings_cached()
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to fetch SimplifyJobs listings: {e}")
     if q:
@@ -865,7 +895,7 @@ async def get_real_job_details(
             "cached": True,
         })
 
-    posting_text = _fetch_job_posting_text(u, max_chars=12000)
+    posting_text = await _fetch_job_posting_text(u, max_chars=12000)
     if not posting_text:
         return JSONResponse(content={
             "success": False,
@@ -873,7 +903,7 @@ async def get_real_job_details(
             "error": "Could not fetch job posting text from apply_url",
         })
 
-    details = _summarize_job_posting_to_requirements(
+    details = await _summarize_job_posting_to_requirements(
         posting_text=posting_text,
         company=(company or None),
         role=(role or None),
@@ -979,7 +1009,16 @@ def call_gemini_with_retry(client, model, contents, max_retries=3, initial_delay
                     raise Exception("Request timed out. The server is experiencing high load. Please try again in a few moments.")
 
                 print(f"[Gemini] Retrying in {delay}s (attempt {attempt + 1}/{max_retries}) - {str(e)[:100]}")
-                time.sleep(delay)
+                # Use asyncio-safe sleep if in async context, otherwise regular sleep
+                import asyncio
+                try:
+                    loop = asyncio.get_running_loop()
+                    # We're in an async context but this is a sync function
+                    # Just use regular sleep - the function will be wrapped with to_thread
+                    time.sleep(delay)
+                except RuntimeError:
+                    # No running event loop, safe to use time.sleep
+                    time.sleep(delay)
                 last_exception = e
                 continue
             else:
@@ -994,6 +1033,15 @@ def call_gemini_with_retry(client, model, contents, max_retries=3, initial_delay
         if "429" in str(last_exception) or "quota" in error_str or "rate limit" in error_str:
             raise Exception("Server is currently busy due to high demand. Please try again in a few moments.")
         raise Exception("Service temporarily unavailable. Please try again in a few moments.")
+
+
+async def call_gemini_with_retry_async(client, model, contents, max_retries=3, initial_delay=1, timeout=60):
+    """Async wrapper for call_gemini_with_retry to avoid blocking the event loop."""
+    import asyncio
+    return await asyncio.to_thread(
+        call_gemini_with_retry,
+        client, model, contents, max_retries, initial_delay, timeout
+    )
 
 
 @app.get("/")
@@ -1221,9 +1269,9 @@ async def analyze_resume(
         Tailor your feedback for {job_role if job_role else "general applications"}
         """
 
-        # Call Gemini API with retry logic
+        # Call Gemini API with retry logic (async to avoid blocking event loop)
         client = genai.Client(api_key=GEMINI_API_KEY)
-        response = call_gemini_with_retry(
+        response = await call_gemini_with_retry_async(
             client=client,
             model="gemini-2.5-flash",
             contents=prompt,
@@ -1232,7 +1280,7 @@ async def analyze_resume(
         )
 
         response_text = response.text
-        
+
         # Extract score from response
         score = None
         score_match = re.search(r'SCORE:\s*(\d+)', response_text, re.IGNORECASE)
@@ -1343,7 +1391,7 @@ Heuristics:
 LISTING:
 {listing_blob}
 """
-                resp = call_gemini_with_retry(
+                resp = await call_gemini_with_retry_async(
                     client=client,
                     model="gemini-2.5-flash",
                     contents=difficulty_prompt,
@@ -1496,7 +1544,7 @@ LISTING:
             job_posting_text = None
             if job_apply_url:
                 # Best-effort: some postings (especially simplify.jobs) are publicly readable.
-                job_posting_text = _fetch_job_posting_text(job_apply_url)
+                job_posting_text = await _fetch_job_posting_text(job_apply_url)
 
             job_context = f"""
     JOB LISTING CONTEXT (from SimplifyJobs/Summer2026-Internships list; may be limited):
@@ -1553,9 +1601,9 @@ JOB POSTING TEXT (best-effort fetch; use this to judge requirements if present):
         - [Actionable tip 2]
         """
 
-        # Call Gemini API with retry logic
+        # Call Gemini API with retry logic (async to avoid blocking event loop)
         client = genai.Client(api_key=GEMINI_API_KEY)
-        response = call_gemini_with_retry(
+        response = await call_gemini_with_retry_async(
             client=client,
             model="gemini-2.5-flash",
             contents=prompt,
@@ -2748,7 +2796,7 @@ async def generate_technical_problem(request: GenerateTechnicalProblemRequest):
                 )
 
         try:
-            problem = _generate_original_problem_from_metadata(question)
+            problem = await _generate_original_problem_from_metadata(question)
         except Exception as e:
             print(f"[WARN] Problem generation failed, using fallback: {e}")
             problem = _validate_generated_problem_payload(_generate_problem_fallback(question))
@@ -2769,7 +2817,7 @@ async def generate_technical_problem(request: GenerateTechnicalProblemRequest):
         raise HTTPException(status_code=500, detail=f"Failed to generate problem: {str(e)}")
 
 
-def analyze_time_complexity_with_ai(code: str, question_title: str, question_description: str, language: str) -> dict:
+async def analyze_time_complexity_with_ai(code: str, question_title: str, question_description: str, language: str) -> dict:
     """
     Use AI to analyze if the solution has optimal time complexity.
     Returns dict with 'is_optimal' (bool) and 'analysis' (str).
@@ -2799,7 +2847,7 @@ Respond in this EXACT JSON format:
 
 Be strict - only mark as optimal if it uses the best known approach."""
 
-        response = call_gemini_with_retry(
+        response = await call_gemini_with_retry_async(
             client=client,
             model="gemini-2.5-flash",
             contents=prompt,
@@ -3132,7 +3180,7 @@ async def run_code(request: RunCodeRequest):
         is_efficient = True
         if request.run_mode == "submit" and all_passed:
             # Use AI to analyze time complexity
-            efficiency_analysis = analyze_time_complexity_with_ai(
+            efficiency_analysis = await analyze_time_complexity_with_ai(
                 request.code,
                 question.get("title", ""),
                 question.get("description", ""),
@@ -3215,14 +3263,14 @@ async def start_voice_interview(request: VoiceInterviewRequest):
         Keep it concise and professional (1-2 sentences). Just return the question, nothing else."""
         
         client = genai.Client(api_key=GEMINI_API_KEY)
-        response = call_gemini_with_retry(
+        response = await call_gemini_with_retry_async(
             client=client,
             model="gemini-2.5-flash",
             contents=prompt,
             max_retries=3,
             initial_delay=2
         )
-        
+
         first_question = response.text.strip()
         interview_sessions[session_id]["current_question"] = first_question
         interview_sessions[session_id]["questions_asked"] = 1  # Track actual count of questions asked
@@ -3256,13 +3304,16 @@ async def start_voice_interview(request: VoiceInterviewRequest):
                 }
                 
                 voice_id = "21m00Tcm4TlvDq8ikWAM"  # Rachel voice
-                response = requests.post(
-                    f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
-                    headers=headers,
-                    json=data,
-                    timeout=30
+                import asyncio
+                response = await asyncio.to_thread(
+                    lambda: requests.post(
+                        f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
+                        headers=headers,
+                        json=data,
+                        timeout=30
+                    )
                 )
-                
+
                 if response.status_code == 200:
                     audio_base64 = base64.b64encode(response.content).decode('utf-8')
                     print(f"ElevenLabs TTS success: Generated audio for question 1")
@@ -3330,7 +3381,7 @@ async def handle_voice_response(
                 }
             ]
             
-            response = call_gemini_with_retry(
+            response = await call_gemini_with_retry_async(
                 client=client,
                 model="gemini-2.5-flash",  # Supports audio input
                 contents=prompt_parts,
@@ -3365,14 +3416,14 @@ Candidate's Response: "{transcript}"
 Respond with ONLY a number from 0-100 based on how well the response meets these criteria."""
         
         client = genai.Client(api_key=GEMINI_API_KEY)
-        eval_response = call_gemini_with_retry(
+        eval_response = await call_gemini_with_retry_async(
             client=client,
             model="gemini-2.5-flash",
             contents=evaluation_prompt,
             max_retries=3,
             initial_delay=2
         )
-        
+
         try:
             response_score = float(eval_response.text.strip())
             response_score = max(0, min(100, response_score))  # Clamp 0-100
@@ -3430,16 +3481,16 @@ Generate question #{next_question_number}. Make it:
 Return ONLY the question, nothing else."""
         
         client = genai.Client(api_key=GEMINI_API_KEY)
-        response = call_gemini_with_retry(
+        response = await call_gemini_with_retry_async(
             client=client,
             model="gemini-2.5-flash",
             contents=prompt,
             max_retries=3,
             initial_delay=2
         )
-        
+
         next_response = response.text.strip()
-        
+
         print(f"[DEBUG] Returning question #{next_question_number} after receiving {num_responses_received} responses")
         print(f"[DEBUG] Question text: {next_response[:100]}...")
         
@@ -3470,13 +3521,16 @@ Return ONLY the question, nothing else."""
                 }
                 
                 voice_id = "21m00Tcm4TlvDq8ikWAM"  # Rachel voice
-                response = requests.post(
-                    f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
-                    headers=headers,
-                    json=data,
-                    timeout=30
+                import asyncio
+                response = await asyncio.to_thread(
+                    lambda: requests.post(
+                        f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
+                        headers=headers,
+                        json=data,
+                        timeout=30
+                    )
                 )
-                
+
                 if response.status_code == 200:
                     audio_base64 = base64.b64encode(response.content).decode('utf-8')
                     print(f"ElevenLabs TTS success: Generated audio")
@@ -3489,7 +3543,7 @@ Return ONLY the question, nothing else."""
                         print("ElevenLabs rate limit exceeded. Please wait before making more requests.")
             except Exception as e:
                 print(f"ElevenLabs error: {str(e)}")
-        
+
         print(f"[DEBUG] Returning question_number: {next_question_number}, completed: False")
         
         return JSONResponse(content={
